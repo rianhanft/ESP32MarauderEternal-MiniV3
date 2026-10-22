@@ -4,6 +4,13 @@
 #include "esp_heap_caps.h"
 #endif
 
+// Default size threshold the ESP32 Arduino core installs for PSRAM-backed
+// malloc (allocations >= this stay internal). Mirror it so ScopedPsramHeap can
+// restore the stock behavior when it exits.
+#ifndef CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL
+#define CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL 16384
+#endif
+
 namespace marauder {
 
 MemoryGuardState::MemoryGuardState(MemoryGuardThresholds thresholds)
@@ -78,6 +85,22 @@ uint32_t RuntimeMemoryGuard::rejectedAllocations() const {
   const uint32_t rejected = rejected_allocations_;
   portEXIT_CRITICAL(&mux_);
   return rejected;
+}
+
+ScopedPsramHeap::ScopedPsramHeap() : active_(false) {
+  // Only steer allocations to PSRAM if PSRAM actually exists on this board.
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) == 0)
+    return;
+  // Allocations of size >= 16 bytes now prefer external RAM. Kept tiny so the
+  // per-AP node, SSID buffer and stations list all land in PSRAM. WiFi/DMA
+  // buffers request internal/DMA caps explicitly and are unaffected.
+  heap_caps_malloc_extmem_enable(16);
+  active_ = true;
+}
+
+ScopedPsramHeap::~ScopedPsramHeap() {
+  if (active_)
+    heap_caps_malloc_extmem_enable(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL);
 }
 #endif
 

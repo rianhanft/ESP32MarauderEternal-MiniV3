@@ -14,6 +14,7 @@
 #include "CensorText.h"
 #include "lang_var.h"
 #include <esp_ota_ops.h>
+#include <esp_heap_caps.h>
 
 #ifdef HAS_PSRAM
   struct mac_addr* mac_history = nullptr;
@@ -2277,12 +2278,22 @@ void WiFiScan::noteApListStalled() {
   if (this->ap_list_full_reported)
     return;
   this->ap_list_full_reported = true;
+  const uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+  const size_t free_internal = heap_caps_get_free_size(caps);
+  const size_t largest_block = heap_caps_get_largest_free_block(caps);
+  const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   #ifdef HAS_SCREEN
     display_obj.queueCriticalLine(
-        "** AP list paused: low memory (" +
-        (String)access_points->size() + " found) **");
+        "** AP list paused @" + (String)access_points->size() + " APs **");
+    display_obj.queueCriticalLine(
+        "int free " + (String)(free_internal / 1024) + "k blk " +
+        (String)(largest_block / 1024) + "k psram " +
+        (String)(free_psram / 1024) + "k");
   #endif
-  Serial.println(F("AP list paused: memory guard rejected new AP (low/fragmented heap)"));
+  Serial.printf(
+      "AP list paused @ %d APs: internal free %u, largest block %u, psram free %u\n",
+      access_points->size(), (unsigned)free_internal, (unsigned)largest_block,
+      (unsigned)free_psram);
 }
 
 int WiFiScan::clearList(uint8_t list_type) {
@@ -7628,6 +7639,11 @@ void WiFiScan::apSnifferCallbackFull(void* buf, wifi_promiscuous_pkt_type_t type
 
         if (wifi_scan_obj.checkMem(
                 sizeof(AccessPoint) + sizeof(LinkedList<uint16_t>) + 128)) {
+
+          // Keep this AP's node/SSID/stations allocations in PSRAM so a dense
+          // dual-band scan can't fragment the internal heap the WiFi driver
+          // needs. Scoped to just the build+insert below.
+          marauder::ScopedPsramHeap psram_ap;
 
           AccessPoint ap;
           ap.essid = essid;
