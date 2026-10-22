@@ -1,5 +1,6 @@
 #include "EvilPortal.h"
 #include "esp_idf_version.h"
+#include "esp_netif.h"
 
 char apName[MAX_AP_NAME_SIZE] = "PORTAL";
 
@@ -342,22 +343,43 @@ void EvilPortal::startAP() {
   WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
   WiFi.softAP(apName);
 
-  // Hand the client the portal URL directly via the DHCP captive-portal option
-  // (RFC 8910). On older ESP32 cores the softAP DHCP advertised itself as the
-  // client's DNS server by default, so upstream's DNS-hijack-only portal popped
-  // automatically; on this ESP32-C5 / IDF 5.5 core it no longer does, so the
-  // phone connects, never queries our DNS, and shows "connected, no portal"
-  // (observed: HTML loads but the portal receives zero requests). This is the
-  // Arduino core's OWN routine -- it checks the AP is started and manages the
-  // DHCP stop/start on the core's own netif handle, so it is safe (unlike the
-  // manual esp_netif surgery that crashed). Retry briefly until the AP reports
-  // started; it returns false (no-op) until then, never crashing.
-  #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 2)
-    for (int i = 0; i < 40; i++) {
-      if (WiFi.AP.enableDhcpCaptivePortal()) break;
-      delay(25);
+  // Make the captive portal actually reach the phone. On older ESP32 cores the
+  // softAP DHCP advertised itself as the client's DNS server by default, so the
+  // classic DNS-hijack portal (dnsServer below, same as upstream/Eternal) popped
+  // automatically. This ESP32-C5 / IDF 5.5 core does NOT set that by default, so
+  // the phone connects, never queries our wildcard DNS, and shows "connected, no
+  // portal" -- exactly the observed failure (HTML loads, zero portal requests).
+  //
+  // Fix, done safely this time: wait until the SoftAP is fully up (DHCP running)
+  // THEN do a single guarded DHCP stop -> set options -> start. The earlier
+  // attempt crashed because it reconfigured DHCP before the AP had started.
+  //   (1) OFFER_DNS + DNS=us  -> phone uses us as DNS -> hijack works everywhere
+  //   (2) RFC 8910 portal URL -> modern phones auto-open it, no DNS needed
+  for (int i = 0; i < 40 && static_cast<uint32_t>(WiFi.softAPIP()) == 0; i++)
+    delay(25);
+
+  esp_netif_t* ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+  if (ap_netif != nullptr && static_cast<uint32_t>(WiFi.softAPIP()) != 0) {
+    esp_err_t stop_err = esp_netif_dhcps_stop(ap_netif);
+    if (stop_err == ESP_OK || stop_err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+      esp_netif_dns_info_t dns_info = {};
+      dns_info.ip.type = ESP_IPADDR_TYPE_V4;
+      dns_info.ip.u_addr.ip4.addr = static_cast<uint32_t>(AP_IP);
+      esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns_info);
+      uint8_t dns_offer = 2;  // OFFER_DNS: hand out a DNS server in DHCP leases
+      esp_netif_dhcps_option(ap_netif, ESP_NETIF_OP_SET,
+                             ESP_NETIF_DOMAIN_NAME_SERVER,
+                             &dns_offer, sizeof(dns_offer));
+      #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 2)
+        char cp_uri[40];
+        snprintf(cp_uri, sizeof(cp_uri), "http://%s",
+                 WiFi.softAPIP().toString().c_str());
+        esp_netif_dhcps_option(ap_netif, ESP_NETIF_OP_SET,
+                               ESP_NETIF_CAPTIVEPORTAL_URI, cp_uri, strlen(cp_uri));
+      #endif
+      esp_netif_dhcps_start(ap_netif);
     }
-  #endif
+  }
 
   #ifndef MARAUDER_V8
     Serial.print(F("ap ip address: "));
