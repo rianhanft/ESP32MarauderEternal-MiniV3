@@ -374,12 +374,23 @@ void Display::drawBootSplash() {
     }
   }
 
-  // Draw a box around the Marauder logo.
+  // "MarauderBox" frame: a rounded double border around the logo, in the theme
+  // accent, so the boot screen reads as the logo boxed up.
   {
-    const int16_t pad = 4;
-    tft.drawRect(layout.logo_x - pad, layout.logo_y - pad,
-                 layout.logo_width + pad * 2, layout.logo_height + pad * 2,
-                 TFT_WHITE);
+    const int16_t pad = 7;
+    int16_t bx = layout.logo_x - pad;
+    int16_t by = layout.logo_y - pad;
+    int16_t bw = layout.logo_width + pad * 2;
+    int16_t bh = layout.logo_height + pad * 2;
+    // Keep the frame on-screen even if the logo sits near an edge.
+    if (bx < 1) { bw += bx - 1; bx = 1; }
+    if (by < 1) { bh += by - 1; by = 1; }
+    if (bx + bw > width - 1) bw = width - 1 - bx;
+    if (by + bh > height - 1) bh = height - 1 - by;
+    const int16_t radius = 6;
+    tft.drawRoundRect(bx, by, bw, bh, radius, TFT_CYAN);
+    tft.drawRoundRect(bx + 2, by + 2, bw - 4, bh - 4,
+                      radius > 1 ? radius - 1 : 1, TFT_CYAN);
   }
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);

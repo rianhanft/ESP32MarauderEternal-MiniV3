@@ -199,7 +199,8 @@ void EvilPortal::setupServer() {
   config.ctrl_port = 32768;
   config.lru_purge_enable = true;
   config.max_uri_handlers = 8;
-  config.stack_size = 8192;
+  config.stack_size = 4096;  // default; keep the httpd task's internal heap small
+  config.max_open_sockets = 4;
 
   if (httpd_start(&evil_portal_httpd, &config) != ESP_OK) {
     evil_portal_httpd = nullptr;

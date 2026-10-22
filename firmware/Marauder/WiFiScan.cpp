@@ -2270,36 +2270,36 @@ bool WiFiScan::checkMem(size_t requestedBytes) {
 }
 
 void WiFiScan::applyScanHeapPolicy(uint8_t scan_mode) {
+  (void)scan_mode;
 #ifdef HAS_PSRAM
-  // The ESP32-C5 Arduino core keeps ordinary malloc/new allocations smaller
-  // than CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL (4096 on this build) in the
-  // internal (DMA-capable) heap the WiFi driver depends on. A dense dual-band
-  // AP sweep makes several such small allocations per AP (list node, SSID
-  // String, per-AP stations list); they fragment the internal heap until the
-  // memory guard pauses additions ("AP list paused: low memory").
+  // Reset to the stock malloc policy at the start of EVERY mode. This is the
+  // single chokepoint (StartScan, main task) that guarantees Wi-Fi driver /
+  // netif / softAP / httpd allocations are never diverted to PSRAM.
   //
-  // For the AP-list scans we drop that threshold so those small allocations go
-  // to PSRAM (megabytes free on the V8) and the internal heap stays contiguous.
-  // EVERY other mode -- Evil Portal above all -- is restored to the stock 4096
-  // so its softAP/TCP path behaves exactly as upstream. This runs once per mode
-  // change from StartScan on the main task, so there is no per-packet race (the
-  // earlier per-AP toggle inside the WiFi RX callback corrupted allocation
-  // placement and crashed Evil Portal after long scans).
+  // AP-list scans re-enable PSRAM routing for their list data, but only AFTER
+  // their Wi-Fi init completes (see RunAPScan). Diverting the driver's own init
+  // allocations to PSRAM corrupted it -- the softAP then refused client
+  // associations (phone "fails to connect") and the next scan failed to start,
+  // especially after a long scan or an Evil Portal session. Keeping init at the
+  // stock policy and only routing the per-AP list data to PSRAM fixes both.
   this->list_in_psram = false;
   if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) == 0)
     return;  // no usable PSRAM -> leave the stock allocator untouched
-  const bool ap_list_scan =
-      (scan_mode == WIFI_SCAN_AP || scan_mode == WIFI_SCAN_AP_STA);
-  heap_caps_malloc_extmem_enable(ap_list_scan ? 16    // route per-AP churn to PSRAM
-                                              : 4096);  // stock C5 default
-  // When the per-AP allocations go to PSRAM, the AP-list guard must check PSRAM,
-  // not the internal heap: the WiFi driver can leave internal free well under
-  // the guard's 24 KB floor (seen: 20 KB) while PSRAM is almost empty, which
-  // otherwise pauses the scan at 0 APs even though adding an AP costs no
-  // internal heap at all.
-  this->list_in_psram = ap_list_scan;
-#else
-  (void)scan_mode;
+  heap_caps_malloc_extmem_enable(4096);  // stock C5 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL
+#endif
+}
+
+void WiFiScan::enableApListPsram() {
+#ifdef HAS_PSRAM
+  // Called by RunAPScan AFTER the Wi-Fi driver is fully initialized: route the
+  // small per-AP allocations built in the RX callback (list node, SSID String,
+  // stations list) to PSRAM so a dense dual-band sweep cannot exhaust the
+  // internal (DMA) heap. The AP-add path then gates on PSRAM free, not the
+  // internal memory guard (see list_in_psram).
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) == 0)
+    return;
+  heap_caps_malloc_extmem_enable(16);
+  this->list_in_psram = true;
 #endif
 }
 
@@ -4487,6 +4487,11 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
   this->setWiFiMode(WIFI_MODE_NULL, apSnifferCallbackFull);
   this->changeChannel(this->set_channel);
   this->wifi_initialized = true;
+
+  // WiFi driver is now fully initialized at the stock heap policy; from here on
+  // route the per-AP list allocations to PSRAM (see enableApListPsram()).
+  this->enableApListPsram();
+
   initTime = millis();
 }
 
