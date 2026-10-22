@@ -624,6 +624,14 @@ class WiFiScan
     // Track for AP list limit (Uninitialised, Done in RunSetup)
     bool ap_list_full_reported;
 
+    // True while the active scan stores its AP list in PSRAM (set by
+    // applyScanHeapPolicy for AP-list scans). The AP-add path then gates on
+    // PSRAM free instead of the internal-heap memory guard.
+    bool list_in_psram = false;
+    // Upper bound on the AP list when it lives in PSRAM, to keep the UI and
+    // attack loops that iterate it responsive. PSRAM itself holds far more.
+    static const int AP_LIST_PSRAM_CAP = 300;
+
     // MULTI SSID STRUCTS
 
     struct MultiSSIDTracker {

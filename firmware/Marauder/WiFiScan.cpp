@@ -2285,43 +2285,35 @@ void WiFiScan::applyScanHeapPolicy(uint8_t scan_mode) {
   // change from StartScan on the main task, so there is no per-packet race (the
   // earlier per-AP toggle inside the WiFi RX callback corrupted allocation
   // placement and crashed Evil Portal after long scans).
+  this->list_in_psram = false;
   if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) == 0)
     return;  // no usable PSRAM -> leave the stock allocator untouched
-  const size_t limit = (scan_mode == WIFI_SCAN_AP ||
-                        scan_mode == WIFI_SCAN_AP_STA)
-                           ? 16        // route per-AP churn to PSRAM
-                           : 4096;     // stock C5 default
-  heap_caps_malloc_extmem_enable(limit);
+  const bool ap_list_scan =
+      (scan_mode == WIFI_SCAN_AP || scan_mode == WIFI_SCAN_AP_STA);
+  heap_caps_malloc_extmem_enable(ap_list_scan ? 16    // route per-AP churn to PSRAM
+                                              : 4096);  // stock C5 default
+  // When the per-AP allocations go to PSRAM, the AP-list guard must check PSRAM,
+  // not the internal heap: the WiFi driver can leave internal free well under
+  // the guard's 24 KB floor (seen: 20 KB) while PSRAM is almost empty, which
+  // otherwise pauses the scan at 0 APs even though adding an AP costs no
+  // internal heap at all.
+  this->list_in_psram = ap_list_scan;
 #else
   (void)scan_mode;
 #endif
 }
 
 void WiFiScan::noteApListStalled() {
-  // One notice per scan. The memory guard pauses AP additions when free heap is
-  // low OR the largest contiguous block is too small (fragmentation), which can
-  // happen in dense RF even while total free heap looks healthy. Make that
-  // visible so a truncated AP list is understood as a memory limit instead of
-  // reading as "Scan AP is broken / doesn't populate all the way".
+  // One concise notice per scan when the AP list stops accepting entries (it is
+  // full at the cap, or -- on non-PSRAM builds -- the memory guard paused it).
   if (this->ap_list_full_reported)
     return;
   this->ap_list_full_reported = true;
-  const uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-  const size_t free_internal = heap_caps_get_free_size(caps);
-  const size_t largest_block = heap_caps_get_largest_free_block(caps);
-  const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   #ifdef HAS_SCREEN
     display_obj.queueCriticalLine(
-        "** AP list paused @" + (String)access_points->size() + " APs **");
-    display_obj.queueCriticalLine(
-        "int free " + (String)(free_internal / 1024) + "k blk " +
-        (String)(largest_block / 1024) + "k psram " +
-        (String)(free_psram / 1024) + "k");
+        "** AP list full (" + (String)access_points->size() + ") **");
   #endif
-  Serial.printf(
-      "AP list paused @ %d APs: internal free %u, largest block %u, psram free %u\n",
-      access_points->size(), (unsigned)free_internal, (unsigned)largest_block,
-      (unsigned)free_psram);
+  Serial.printf("AP list full at %d entries\n", access_points->size());
 }
 
 int WiFiScan::clearList(uint8_t list_type) {
@@ -7679,8 +7671,17 @@ void WiFiScan::apSnifferCallbackFull(void* buf, wifi_promiscuous_pkt_type_t type
           Serial.print(essid + " ");
         }
 
-        if (wifi_scan_obj.checkMem(
-                sizeof(AccessPoint) + sizeof(LinkedList<uint16_t>) + 128)) {
+        // When the list lives in PSRAM (AP scans), gate on PSRAM free, not the
+        // internal-heap memory guard: the WiFi driver can push internal free
+        // under the guard's 24 KB floor (seen: 20 KB) while PSRAM is nearly
+        // empty, which otherwise paused the scan at 0 APs even though a
+        // PSRAM-bound AP costs no internal heap. Non-PSRAM path keeps the guard.
+        const bool ap_has_room = wifi_scan_obj.list_in_psram
+            ? (access_points->size() < WiFiScan::AP_LIST_PSRAM_CAP &&
+               heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 65536)
+            : wifi_scan_obj.checkMem(
+                  sizeof(AccessPoint) + sizeof(LinkedList<uint16_t>) + 128);
+        if (ap_has_room) {
 
           // This AP's node/SSID/stations allocations land in PSRAM because the
           // scan was started in PSRAM-list mode (see applyScanHeapPolicy(),
@@ -7726,16 +7727,20 @@ void WiFiScan::apSnifferCallbackFull(void* buf, wifi_promiscuous_pkt_type_t type
           ap.man = "";
           ap.last_seen_ms = millis();
 
-          if (!marauder::memoryGuardedAdd(access_points, ap)) {
+          // In PSRAM-list mode add directly (the allocation already goes to
+          // PSRAM via the extmem threshold); otherwise keep the internal-heap
+          // guarded add.
+          const bool ap_added = wifi_scan_obj.list_in_psram
+              ? access_points->add(ap)
+              : marauder::memoryGuardedAdd(access_points, ap);
+          if (!ap_added) {
             delete ap.stations;
             wifi_scan_obj.noteApListStalled();
           }
         }
         else {
-          // checkMem() refused up front: free heap is low or too fragmented to
-          // hold another AccessPoint. Report it once per scan instead of
-          // silently dropping APs, so a truncated list reads as a memory limit
-          // rather than looking like the scanner is broken.
+          // No room: PSRAM list hit its cap, or (non-PSRAM) the memory guard
+          // paused additions. Report once per scan instead of silently dropping.
           wifi_scan_obj.noteApListStalled();
         }
 
