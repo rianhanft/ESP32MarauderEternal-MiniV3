@@ -3305,6 +3305,13 @@ void WiFiScan::StopScan(uint8_t scan_mode) {
   (currentScanMode == LV_JOIN_WIFI) ||
   (this->wifi_initialized))
   {
+    // Evil Portal: tear down the web server + DNS (cleanup()) BEFORE shutdownWiFi()
+    // deinits the network stack, so server.end() runs while lwIP is still alive
+    // and the next activation's server.begin() can re-arm the listener. cleanup()
+    // is idempotent (the later call below becomes a no-op once runServer is clear).
+    if (currentScanMode == WIFI_SCAN_EVIL_PORTAL)
+      evil_portal_obj.cleanup();
+
     this->shutdownWiFi();
 
     if (!this->wifi_connected) {
