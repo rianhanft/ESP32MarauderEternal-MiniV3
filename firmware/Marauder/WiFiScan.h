@@ -8,6 +8,7 @@
 #include "GpsTrackerStats.h"
 #include "IBeacon.h"
 #include "RemoteIdDecoder.h"
+#include "WiFiCameraDetector.h"   // Ported from Marauder Eternal (Camera Deauther targets)
 #include "WigleFormat.h"
 
 #include <ArduinoJson.h>
@@ -119,6 +120,7 @@
 #define WIFI_SCAN_RAW_CAPTURE 25
 #define WIFI_SCAN_STATION 26
 #define WIFI_ATTACK_DEAUTH_TARGETED 27
+#define WIFI_ATTACK_CAMERA_DEAUTH 155   // Ported from Marauder Eternal
 #define WIFI_SCAN_ACTIVE_LIST_EAPOL 28
 #define WIFI_SCAN_SIG_STREN 29
 #define WIFI_SCAN_EVIL_PORTAL 30
@@ -406,6 +408,11 @@ class WiFiScan
     uint8_t remote_id_target_mac[6] = {};
     bool remote_id_target_has_uas = false;
     bool remote_id_target_selected = false;
+    // Ported from Marauder Eternal: Camera Deauther target state.
+    WiFiCameraDetector::DeauthTarget camera_deauth_targets{};
+    uint8_t camera_deauth_cursor = 0;
+    uint8_t camera_deauth_view = 0;
+    uint32_t camera_deauth_next_ui = 0;
     uint32_t remote_id_last_render_ms = 0;
     uint8_t remote_id_schedule_step = 0;
     uint8_t remote_id_beacon_channel_index = 0;
@@ -842,6 +849,9 @@ class WiFiScan
     void sendBadMsgAttack(uint32_t currentTime, bool all = false);
     void sendAssocSleepAttack(uint32_t currentTime, bool all = false);
     void sendDeauthFrame(uint8_t bssid[6], int channel, uint8_t mac[6]);
+    // Ported from Marauder Eternal: Camera Deauther (internal helpers).
+    void sendCameraDeauthFrame(WiFiCameraDetector::DeauthLink& link);
+    void drawCameraDeauthStatus();
     void sendEapolBagMsg1(uint8_t bssid[6], int channel, uint8_t mac[6], uint8_t sec = WIFI_SECURITY_WPA2);
     void sendAssociationSleep(const char* ESSID, uint8_t bssid[6], int channel, uint8_t mac[6]);
     void broadcastRandomSSID(uint32_t currentTime);
@@ -1189,6 +1199,8 @@ class WiFiScan
     uint8_t currentScanMode = 0;
     void main(uint32_t currentTime);
     void StartScan(uint8_t scan_mode, uint16_t color = 0);
+    // Ported from Marauder Eternal: set Camera Deauther targets (called from menu).
+    void setCameraDeauthTargets(const WiFiCameraDetector::DeauthTarget& targets);
     void StopScan(uint8_t scan_mode);
     void setBaseMacAddress(uint8_t macAddr[6]);
 

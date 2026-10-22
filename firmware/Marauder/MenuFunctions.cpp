@@ -4936,6 +4936,19 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
           DroneRemoteIDSpoofer::run();
         });
       });
+      this->addNodes(menu, "Camera Deauther", TFTRED, DEAUTH_SNIFF, [this]() {
+        // Ported from Marauder Eternal: deauth confirmed camera links.
+        static WiFiCameraDetector::DeauthTarget target{};
+        if (!WiFiCameraDetector::selectDeauthTarget(target)) {
+          display_obj.init();
+          this->changeMenu(&wifiAttackMenu, true);
+          return;
+        }
+        wifi_scan_obj.setCameraDeauthTargets(target);
+        display_obj.clearScreen();
+        this->drawStatusBar();
+        wifi_scan_obj.StartScan(WIFI_ATTACK_CAMERA_DEAUTH, TFT_RED);
+      });
       this->addNodes(menu, text_table1[50], TFTRED, BEACON_LIST, [this]() {
         display_obj.clearScreen();
         this->drawStatusBar();
