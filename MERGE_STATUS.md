@@ -57,7 +57,19 @@ games/scout **on v8**, add a touch control scheme (map touch zones to the
 `GameInput` button edges) — tracked as follow‑up. Everything else (the official
 UI + all official attacks/sniffers) runs on v8 via touch today.
 
-### Known limitation — v8 display pins
+### V8 display config — RESOLVED (reverse-engineered from hardware)
+Marauder V8 = ESP32-C5 + **2.8" ILI9341 240x320** + **XPT2046 resistive touch**.
+JCMK's setup is private; pins were independently reverse-engineered by two people
+who agree on the display bus (H4W9/ESP32_Library voltmeter+scan; skizzophrenic/
+SquachWatch-CYD probed ILI9341 ID 0x9341 + XPT2046):
+`MOSI 7, MISO 2, SCLK 6, CS 23, DC 24, RST -1 (tied to EN), BL 8 (active HIGH),
+SD_CS 10`, RGB order = BGR. Captured in `libraries/TFT_eSPI/User_Setup_marauder_v8.h`.
+TOUCH_CS: H4W9 = GPIO3, skizzophrenic = GPIO9 — two test bins shipped
+(`update_v8_touchcs3.bin`, `update_v8_touchcs9.bin`); use whichever gives working
+touch. The earlier black screen was caused by the first guess (ST7796 320x480,
+Pancake pins) being the wrong driver, resolution, touch type AND pins.
+
+### Known limitation — v8 display pins (superseded by the RESOLVED section above)
 Official's *exact* v8 TFT_eSPI User_Setup (display driver + SPI GPIO) is published
 only in justcallmekoko's **private** `TFT_eSPI_JCMK` fork; it is not in the public
 repo (only STL mechanicals, no schematic). `libraries/TFT_eSPI/User_Setup_marauder_v8.h`

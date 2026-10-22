@@ -1,55 +1,45 @@
 // =============================================================================
 // TFT_eSPI setup for the ESP32 Marauder V8 (JustCallMeKoKo), ESP32-C5.
 // =============================================================================
-// CONFIRMED hardware (official source + JCMK wiki "Marauder v8" page):
-//   * Panel driver : ILI9341   (NOT ST7796 — that is the Pancake/Waveshare class)
-//   * Resolution   : 240 x 320 (2.8" display), portrait, SCREEN_ORIENTATION 0
-//   * Touch        : XPT2046 resistive over SPI (TFT_eSPI built-in setTouch);
-//                    firmware uses the HAS_ILI9341 resistive path, NOT FT6336.
-//   * Backlight    : plain GPIO driven by ESP32 LEDC PWM (no I/O expander).
-//   * I2C (aux/batt): SCL=GPIO4, SDA=GPIO5  -> TFT/touch pins must AVOID 4 & 5.
-//
-// !!! PINS ARE NOT YET KNOWN !!!
-// The exact V8 GPIO pin map (MOSI/MISO/SCLK/CS/DC/RST/BL + TOUCH_CS) lives ONLY
-// in JCMK's PRIVATE fork justcallmekoko/TFT_eSPI_JCMK and is not published in
-// any public source (verified: main repo, the public TFT_eSPI fork branches,
-// H4W9/TFT_eSPI ESP32-C5, the wiki, and web). The values below are PLACEHOLDERS
-// and WILL produce a black screen until replaced with the real V8 wiring from
-// the private User_Setup or the V8 schematic. Do not flash a build made with
-// these placeholder pins.
+// Marauder V8 = ESP32-C5 + 2.8" ILI9341 240x320 display + XPT2046 resistive touch.
+// JCMK's own V8 setup is private; these pins were independently reverse-engineered
+// from real hardware by two people who agree on the display bus:
+//   * H4W9/ESP32_Library (voltmeter + brute-force scan, Apr 2026) — the same
+//     contributor whose TFT_eSPI fork JCMK's official CI uses for C5 boards.
+//   * skizzophrenic/SquachWatch-CYD (probed ILI9341 ID 0x9341 + XPT2046, Oct 2026).
+// Confirmed pins: MOSI7 MISO2 SCLK6 CS23 DC24 RST=-1(EN) BL8(HIGH) SD_CS10.
+// TOUCH_CS: H4W9 found GPIO3, skizzophrenic found GPIO9 — if touch does not
+// respond, switch TOUCH_CS from 3 to 9 (display is unaffected either way).
 // =============================================================================
 
 // Section 1. Driver ----------------------------------------------------------
 #define ILI9341_DRIVER
 
-// Section 2. Geometry --------------------------------------------------------
-#define TFT_WIDTH   240
-#define TFT_HEIGHT  320
+// V8 panel uses RGB colour order — without this, RED displays as BLUE.
+#define TFT_RGB_ORDER TFT_BGR
 
-// Section 3. Pins  ----  <<< REPLACE ALL OF THESE WITH THE REAL V8 VALUES >>> --
-// Placeholders only. Must not collide with I2C (GPIO4/GPIO5) on the V8.
-#define TFT_MISO  -1   // PLACEHOLDER — real V8 value needed
-#define TFT_MOSI  -1   // PLACEHOLDER — real V8 value needed
-#define TFT_SCLK  -1   // PLACEHOLDER — real V8 value needed
-#define TFT_CS    -1   // PLACEHOLDER — real V8 value needed
-#define TFT_DC    -1   // PLACEHOLDER — real V8 value needed
-#define TFT_RST   -1   // PLACEHOLDER — real V8 value needed (TFT_eSPI pulses this)
-#define TFT_BL    -1   // PLACEHOLDER — real V8 backlight GPIO (LEDC PWM) needed
+// Section 2. Pins (ESP32-C5 FSPI bus, shared by TFT + SD + XPT2046 touch) -----
+#define TFT_MISO  2
+#define TFT_MOSI  7
+#define TFT_SCLK  6
 
-// Resistive touch (XPT2046) shares the SPI bus; needs its own chip-select.
-#define TOUCH_CS  -1   // PLACEHOLDER — real V8 T_CS value needed
+#define TFT_CS   23   // Display chip select
+#define TFT_DC   24   // Data / Command
+#define TFT_RST  -1   // Reset tied to EN via hardware — no GPIO
 
-// Section 4. Fonts -----------------------------------------------------------
+#define TFT_BL    8   // PWM backlight
+#define TFT_BACKLIGHT_ON HIGH
+
+#define TOUCH_CS  3   // XPT2046 resistive touch (alt: 9 — see header note)
+
+// Section 3. Fonts -----------------------------------------------------------
 #define LOAD_GLCD
 #define LOAD_FONT2
 #define LOAD_FONT4
-#define LOAD_FONT6
-#define LOAD_FONT7
-#define LOAD_FONT8
 #define LOAD_GFXFF
 #define SMOOTH_FONT
 
-// Section 5. SPI speed -------------------------------------------------------
-#define SPI_FREQUENCY       27000000
+// Section 4. SPI speed -------------------------------------------------------
+#define SPI_FREQUENCY       20000000
 #define SPI_READ_FREQUENCY  20000000
 #define SPI_TOUCH_FREQUENCY  2500000
