@@ -5,6 +5,9 @@
 #include "CensorText.h"
 #include "lang_var.h"
 #include "WirelessDeviceScout.h"   // Ported from Marauder Eternal (WiFi sniffer)
+#include "BLEDeviceDetectors.h"    // Ported from Marauder Eternal (BLE device sniffers)
+#include "WirelessActivityTools.h" // Ported from Marauder Eternal (WiFi Jam Detector)
+#include "WiFiCameraDetector.h"    // Ported from Marauder Eternal (WiFi Camera scanner)
 #if defined(HAS_CSI_MOTION)
   #include "CsiMotionMonitor.h"
 #endif
@@ -4742,6 +4745,14 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         WirelessDeviceScout::run();              // ported from Marauder Eternal
         this->changeMenu(&wifiSnifferMenu, true);
       });
+      this->addNodes(menu, "Jam Detector", TFTRED, SCANNERS, [this]() {
+        WirelessActivityTools::runJamDetector(); // ported from Marauder Eternal
+        this->changeMenu(&wifiSnifferMenu, true);
+      });
+      this->addNodes(menu, "Camera Detect", TFTCYAN, SCANNERS, [this]() {
+        WiFiCameraDetector::run();                   // ported from Marauder Eternal
+        this->changeMenu(&wifiSnifferMenu, true);
+      });
       this->addNodes(menu, text_table1[42], TFTCYAN, PROBE_SNIFF, [this]() {
         display_obj.clearScreen();
         this->drawStatusBar();
@@ -5058,6 +5069,32 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this]() {
           this->changeMenu(bluetoothSnifferMenu.parentMenu, true);
         });
+        // --- Ported from Marauder Eternal: BLE device-type sniffers ---
+        this->addNodes(menu, "Meshtastic Sniff", TFTGREEN, BLUETOOTH_SNIFF, [this]() {
+          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::Meshtastic);
+          this->changeMenu(&bluetoothSnifferMenu, true);
+        });
+        this->addNodes(menu, "MeshCore Sniff", TFTCYAN, BLUETOOTH_SNIFF, [this]() {
+          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::MeshCore);
+          this->changeMenu(&bluetoothSnifferMenu, true);
+        });
+        this->addNodes(menu, "SmartTag Sniff", TFTYELLOW, BLUETOOTH_SNIFF, [this]() {
+          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::SmartTag);
+          this->changeMenu(&bluetoothSnifferMenu, true);
+        });
+        this->addNodes(menu, "Tile Sniff", TFTORANGE, BLUETOOTH_SNIFF, [this]() {
+          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::Tile);
+          this->changeMenu(&bluetoothSnifferMenu, true);
+        });
+        this->addNodes(menu, "Axon Sniff", TFTRED, BLUETOOTH_SNIFF, [this]() {
+          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::Axon);
+          this->changeMenu(&bluetoothSnifferMenu, true);
+        });
+        this->addNodes(menu, "NyanBOX Sniff", TFTMAGENTA, BLUETOOTH_SNIFF, [this]() {
+          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::NyanBox);
+          this->changeMenu(&bluetoothSnifferMenu, true);
+        });
+        // --- end Eternal BLE sniffers ---
         this->addNodes(menu, text_table1[34], TFTGREEN, BLUETOOTH_SNIFF, [this]() {
           display_obj.clearScreen();
           this->drawStatusBar();

@@ -9,10 +9,12 @@
 
 #include "configs.h"
 
-#if defined(MARAUDER_MINI_V3) && defined(HAS_BT) && \
-    defined(HAS_NIMBLE_2) && defined(HAS_SCREEN) && \
-    defined(HAS_BUTTONS) && (U_BTN >= 0) && (D_BTN >= 0) && \
-    (L_BTN >= 0) && (R_BTN >= 0) && (C_BTN >= 0)
+// Enabled on the Mini V3 (physical D-pad) or any touch board (Marauder V8),
+// where u_btn..c_btn come from EternalTouchButtons.cpp as touch zones.
+#if defined(HAS_BT) && defined(HAS_NIMBLE_2) && defined(HAS_SCREEN) && ( \
+      (defined(HAS_BUTTONS) && (U_BTN >= 0) && (D_BTN >= 0) && \
+       (L_BTN >= 0) && (R_BTN >= 0) && (C_BTN >= 0)) \
+      || defined(HAS_TOUCH) )
 
 #include <NimBLEDevice.h>
 #include <WiFi.h>
