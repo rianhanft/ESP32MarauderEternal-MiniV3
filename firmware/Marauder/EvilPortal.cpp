@@ -1,5 +1,4 @@
 #include "EvilPortal.h"
-#include "esp_netif.h"
 
 char apName[MAX_AP_NAME_SIZE] = "PORTAL";
 
@@ -336,36 +335,11 @@ bool EvilPortal::setAP(String essid) {
 }
 
 void EvilPortal::startAP() {
-  // Standard private captive-portal gateway. 172.0.0.0/8 is a *public* range,
-  // which some phones refuse to show a captive portal for; 192.168.4.1 is the
-  // universally used ESP32 softAP/captive address.
-  const IPAddress AP_IP(192, 168, 4, 1);
+  const IPAddress AP_IP(172, 0, 0, 1);
 
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
   WiFi.softAP(apName);
-
-  // The captive portal works by hijacking DNS: dnsServer (below) resolves every
-  // name to us. For the phone to actually send its connectivity-check DNS query
-  // here, the softAP's DHCP must hand out THIS device as the client's DNS
-  // server. The Arduino core does not do that by default, so the phone queries
-  // its own cached/hardcoded DNS, gets nothing (no uplink), and shows
-  // "connected" with no portal -- exactly the reported symptom. Advertise
-  // ourselves as the DHCP DNS server here. Best-effort: on any failure the
-  // DHCP server is always restarted so clients can still associate.
-  esp_netif_t* ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
-  if (ap_netif != nullptr) {
-    esp_netif_dhcps_stop(ap_netif);
-    esp_netif_dns_info_t dns_info = {};
-    dns_info.ip.type = ESP_IPADDR_TYPE_V4;
-    dns_info.ip.u_addr.ip4.addr = static_cast<uint32_t>(AP_IP);
-    esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns_info);
-    uint8_t dhcps_dns_offer = 2;  // OFFER_DNS: advertise a DNS server via DHCP
-    esp_netif_dhcps_option(ap_netif, ESP_NETIF_OP_SET,
-                           ESP_NETIF_DOMAIN_NAME_SERVER,
-                           &dhcps_dns_offer, sizeof(dhcps_dns_offer));
-    esp_netif_dhcps_start(ap_netif);
-  }
 
   #ifndef MARAUDER_V8
     Serial.print(F("ap ip address: "));
