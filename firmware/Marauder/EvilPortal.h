@@ -112,6 +112,13 @@ class EvilPortal {
     bool using_serial_html;
     bool has_ap;
 
+    // Diagnostics: count HTTP requests the portal actually receives (bumped from
+    // the async web-server callbacks) and the last count surfaced on screen, so
+    // main() can report "did the phone's request reach us" without writing to
+    // the display from the async task.
+    volatile uint32_t http_hits = 0;
+    uint32_t http_hits_shown = 0;
+
     LinkedList<String>* html_files;
 
     void cleanup();
