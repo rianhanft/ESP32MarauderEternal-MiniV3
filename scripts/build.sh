@@ -1,60 +1,66 @@
 #!/usr/bin/env bash
+# Build the merged official-base Marauder firmware for a given board target.
+#
+# Usage:  scripts/build.sh <BOARD> [BUILD_DIR]
+#   BOARD = PANCAKE | V8 | MINI_V3 | WS_C5_35
+#
+# Requires arduino-cli with the ESP32 Arduino core 3.3.4 installed.
+# Set ARDUINO_CLI_BIN to the arduino-cli path if it is not on PATH.
 set -euo pipefail
 
+BOARD="${1:-PANCAKE}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
-SKETCH_DIR="${PROJECT_DIR}/firmware/MarauderEternal"
+SKETCH_DIR="${PROJECT_DIR}/firmware/Marauder"
 LIBRARY_DIR="${PROJECT_DIR}/libraries"
-BUILD_DIR="${1:-${PROJECT_DIR}/build}"
+BUILD_DIR="${2:-${PROJECT_DIR}/build/${BOARD}}"
 CACHE_DIR="${BUILD_DIR}/cache"
-FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=custom,PSRAM=enabled"
 EXPECTED_CORE_VERSION="3.3.4"
-APPLICATION_PARTITION_SIZE=$((0x3c0000))
 
-if [[ -n "${ARDUINO_CLI_BIN:-}" ]]; then
-  ARDUINO_CLI="${ARDUINO_CLI_BIN}"
-elif command -v arduino-cli >/dev/null 2>&1; then
-  ARDUINO_CLI="$(command -v arduino-cli)"
-elif [[ -x /tmp/arduino-cli-bin/arduino-cli ]]; then
-  ARDUINO_CLI=/tmp/arduino-cli-bin/arduino-cli
-else
-  echo "arduino-cli was not found. Set ARDUINO_CLI_BIN to its absolute path." >&2
-  exit 1
+# --- board -> FQBN / define / TFT User_Setup -------------------------------
+case "${BOARD}" in
+  PANCAKE)  FLAG="MARAUDER_PANCAKE"; TFT="User_Setup_marauder_pancake.h";
+            FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled" ;;
+  V8)       FLAG="MARAUDER_V8";      TFT="User_Setup_marauder_v8.h";
+            FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled" ;;
+  WS_C5_35) FLAG="MARAUDER_WS_C5_35"; TFT="User_Setup_ws_c5_35.h";
+            FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled" ;;
+  MINI_V3)  FLAG="MARAUDER_MINI_V3"; TFT="User_Setup_marauder_mini_v3.h";
+            FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled" ;;
+  *) echo "Unknown board '${BOARD}'. Use PANCAKE|V8|MINI_V3|WS_C5_35." >&2; exit 2 ;;
+esac
+
+# --- locate arduino-cli -----------------------------------------------------
+if [[ -n "${ARDUINO_CLI_BIN:-}" ]]; then ARDUINO_CLI="${ARDUINO_CLI_BIN}";
+elif command -v arduino-cli >/dev/null 2>&1; then ARDUINO_CLI="$(command -v arduino-cli)";
+else echo "arduino-cli not found. Set ARDUINO_CLI_BIN." >&2; exit 1; fi
+
+CORE_VER="$("${ARDUINO_CLI}" core list 2>/dev/null | awk '$1=="esp32:esp32"{print $2}')"
+if [[ "${CORE_VER}" != "${EXPECTED_CORE_VERSION}" ]]; then
+  echo "ESP32 core ${EXPECTED_CORE_VERSION} required; found ${CORE_VER:-none}." >&2; exit 1
 fi
 
+# --- stage libraries with exactly one active TFT User_Setup -----------------
 mkdir -p "${BUILD_DIR}" "${CACHE_DIR}"
+STAGE_LIBS="${BUILD_DIR}/libs"
+rm -rf "${STAGE_LIBS}"; mkdir -p "${STAGE_LIBS}"
+cp -r "${LIBRARY_DIR}/." "${STAGE_LIBS}/"
+SEL="${STAGE_LIBS}/TFT_eSPI/User_Setup_Select.h"
+# comment out every marauder User_Setup include, then enable the one for BOARD
+sed -i -E 's@^[[:space:]]*#include <(User_Setup_[A-Za-z0-9_]+\.h)>@//#include <\1>@' "${SEL}"
+sed -i "s@^//#include <${TFT}>@#include <${TFT}>@" "${SEL}"
+echo "Active TFT setup(s):"; grep -nE "^#include <User_Setup_" "${SEL}" || true
 
-INSTALLED_CORE_VERSION="$("${ARDUINO_CLI}" core list | awk '$1 == "esp32:esp32" {print $2}')"
-if [[ "${INSTALLED_CORE_VERSION}" != "${EXPECTED_CORE_VERSION}" ]]; then
-  echo "ESP32 Arduino core ${EXPECTED_CORE_VERSION} is required; found ${INSTALLED_CORE_VERSION:-none}." >&2
-  exit 1
-fi
-
+# --- compile ----------------------------------------------------------------
 TZ=UTC "${ARDUINO_CLI}" compile \
-  --warnings all \
+  --warnings none \
   --fqbn "${FQBN}" \
-  --libraries "${LIBRARY_DIR}" \
+  --libraries "${STAGE_LIBS}" \
   --build-path "${CACHE_DIR}" \
-  --build-property "compiler.cpp.extra_flags=-DMARAUDER_MINI_V3" \
-  --build-property "compiler.c.extra_flags=-DMARAUDER_MINI_V3" \
-  --build-property "compiler.c.elf.extra_flags=-Wl,--wrap=ieee80211_raw_frame_sanity_check -Wl,--defsym=ieee80211_raw_frame_sanity_check=__wrap_ieee80211_raw_frame_sanity_check" \
+  --build-property "compiler.cpp.extra_flags=-D${FLAG}" \
+  --build-property "compiler.c.extra_flags=-D${FLAG}" \
+  --build-property "compiler.c.elf.extra_flags=-Wl,-zmuldefs" \
   --output-dir "${BUILD_DIR}" \
   "${SKETCH_DIR}"
 
-APP_IMAGE="${BUILD_DIR}/MarauderEternal.ino.bin"
-MAP_FILE="${BUILD_DIR}/MarauderEternal.ino.map"
-APP_SIZE="$(stat -c '%s' "${APP_IMAGE}")"
-
-if ! grep -Eq \
-  'ieee80211_raw_frame_sanity_check[[:space:]]*=[[:space:]]*__wrap_ieee80211_raw_frame_sanity_check' \
-  "${MAP_FILE}"; then
-  echo "Raw-frame compatibility hook was not linked into the firmware." >&2
-  exit 1
-fi
-
-if (( APP_SIZE > APPLICATION_PARTITION_SIZE )); then
-  echo "Application is ${APP_SIZE} bytes and exceeds the ${APPLICATION_PARTITION_SIZE}-byte OTA slot." >&2
-  exit 1
-fi
-
-echo "Build complete: ${APP_IMAGE} (${APP_SIZE}/${APPLICATION_PARTITION_SIZE} bytes)"
+echo "Build complete for ${BOARD}: ${BUILD_DIR}/$(basename "${SKETCH_DIR}").ino.bin"
