@@ -882,6 +882,9 @@ class WiFiScan
     // Emit a one-shot on-screen + serial notice when the memory guard refuses
     // to add another AccessPoint during a scan (ap_list_full_reported gates it).
     void noteApListStalled();
+    // Steer bulk list allocations to PSRAM for AP-list scans, stock allocator
+    // otherwise. Called once per mode change from StartScan (main task).
+    void applyScanHeapPolicy(uint8_t scan_mode);
     void writeHeader(bool poi = false);
     void writeFooter(bool poi = false);
     void displayWardriveStats();

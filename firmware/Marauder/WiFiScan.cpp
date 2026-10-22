@@ -2269,6 +2269,34 @@ bool WiFiScan::checkMem(size_t requestedBytes) {
   return marauder::RuntimeMemoryGuard::instance().allow(requestedBytes);
 }
 
+void WiFiScan::applyScanHeapPolicy(uint8_t scan_mode) {
+#ifdef HAS_PSRAM
+  // The ESP32-C5 Arduino core keeps ordinary malloc/new allocations smaller
+  // than CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL (4096 on this build) in the
+  // internal (DMA-capable) heap the WiFi driver depends on. A dense dual-band
+  // AP sweep makes several such small allocations per AP (list node, SSID
+  // String, per-AP stations list); they fragment the internal heap until the
+  // memory guard pauses additions ("AP list paused: low memory").
+  //
+  // For the AP-list scans we drop that threshold so those small allocations go
+  // to PSRAM (megabytes free on the V8) and the internal heap stays contiguous.
+  // EVERY other mode -- Evil Portal above all -- is restored to the stock 4096
+  // so its softAP/TCP path behaves exactly as upstream. This runs once per mode
+  // change from StartScan on the main task, so there is no per-packet race (the
+  // earlier per-AP toggle inside the WiFi RX callback corrupted allocation
+  // placement and crashed Evil Portal after long scans).
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) == 0)
+    return;  // no usable PSRAM -> leave the stock allocator untouched
+  const size_t limit = (scan_mode == WIFI_SCAN_AP ||
+                        scan_mode == WIFI_SCAN_AP_STA)
+                           ? 16        // route per-AP churn to PSRAM
+                           : 4096;     // stock C5 default
+  heap_caps_malloc_extmem_enable(limit);
+#else
+  (void)scan_mode;
+#endif
+}
+
 void WiFiScan::noteApListStalled() {
   // One notice per scan. The memory guard pauses AP additions when free heap is
   // low OR the largest contiguous block is too small (fragmentation), which can
@@ -2814,7 +2842,14 @@ bool WiFiScan::scanning() {
 }
 
 // Function to prepare to run a specific scan
-void WiFiScan::StartScan(uint8_t scan_mode, uint16_t color) {  
+void WiFiScan::StartScan(uint8_t scan_mode, uint16_t color) {
+  // Choose the heap-allocation policy for the NEW mode before anything runs:
+  // AP-list scans route bulk allocations to PSRAM; every other mode -- Evil
+  // Portal's softAP/web-server setup above all -- must build on the stock
+  // allocator. This has to happen before the Run*() dispatch below, otherwise
+  // (e.g.) RunEvilPortal() would allocate its server/softAP under a previous AP
+  // scan's PSRAM threshold and crash or fail to serve the portal page.
+  this->applyScanHeapPolicy(scan_mode);
   #if defined(HAS_CSI_MOTION)
     if (scan_mode == WIFI_SCAN_OFF &&
         currentScanMode == WIFI_SCAN_CSI_MOTION) {
@@ -7640,11 +7675,10 @@ void WiFiScan::apSnifferCallbackFull(void* buf, wifi_promiscuous_pkt_type_t type
         if (wifi_scan_obj.checkMem(
                 sizeof(AccessPoint) + sizeof(LinkedList<uint16_t>) + 128)) {
 
-          // Keep this AP's node/SSID/stations allocations in PSRAM so a dense
-          // dual-band scan can't fragment the internal heap the WiFi driver
-          // needs. Scoped to just the build+insert below.
-          marauder::ScopedPsramHeap psram_ap;
-
+          // This AP's node/SSID/stations allocations land in PSRAM because the
+          // scan was started in PSRAM-list mode (see applyScanHeapPolicy(),
+          // called once from StartScan). That keeps the internal (DMA) heap the
+          // WiFi driver needs contiguous during a dense dual-band sweep.
           AccessPoint ap;
           ap.essid = essid;
           ap.channel = snifferPacket->rx_ctrl.channel;
