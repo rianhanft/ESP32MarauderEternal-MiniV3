@@ -30,7 +30,7 @@
 #define TFT_BL    8   // PWM backlight
 #define TFT_BACKLIGHT_ON HIGH
 
-#define TOUCH_CS  3   // XPT2046 resistive touch (alt: 9 — see header note)
+#define TOUCH_CS  9   // XPT2046 resistive touch (HARDWARE-CONFIRMED on V8; H4W9 reported 3)
 
 // Section 3. Fonts -----------------------------------------------------------
 #define LOAD_GLCD
