@@ -1,0 +1,23 @@
+@misc{marauder_eternal_repo,
+  author = {{rianhanft}},
+  title = {ESP32 Marauder Eternal 1.16.4},
+  howpublished = {GitHub repository},
+  url = {https://github.com/rianhanft/ESP32MarauderEternal-MiniV3},
+  note = {The repository explicitly states that this firmware is built for the Marauder Mini V3 only, with an ESP32-C5 revision 1 or later, 8 MB flash with PSRAM enabled, and a 128x128 ST7735 display. The README further states that the source contains a compile-time guard that rejects non-ESP32-C5 targets and that MARAUDER\_MINI\_V3 is fixed by project configuration. This means it is not a general-purpose firmware for all Marauder V8 C5 boards.}
+}
+
+@misc{marauder_eternal_flasher,
+  author = {{rianhanft}},
+  title = {Marauder Eternal Flasher},
+  howpublished = {GitHub repository documentation},
+  url = {https://github.com/rianhanft/ESP32MarauderEternal-MiniV3/blob/main/flasher/README.md},
+  note = {The flasher documentation describes the desktop flasher for the Marauder Mini V3 with an ESP32-C5 and 8 MB flash, and explicitly targets the verified Mini V3 full-device image. It is not documented as a universal flasher for the Marauder V8 C5.}
+}
+
+@misc{marauder_eternal_board_constraints,
+  author = {{rianhanft}},
+  title = {ESP32 Marauder Eternal board and flash target constraints},
+  howpublished = {Repository README},
+  url = {https://github.com/rianhanft/ESP32MarauderEternal-MiniV3/blob/main/README.md},
+  note = {The README identifies the supported target as \texttt{Marauder Mini V3}, \texttt{ESP32-C5 revision 1 or later}, and \texttt{FlashSize=8M,PartitionScheme=custom,PSRAM=enabled}, and states that the project rejects other board targets. This is the key compatibility constraint for any citation of this firmware.}
+}
