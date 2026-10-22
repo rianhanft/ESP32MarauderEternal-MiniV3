@@ -1,4 +1,5 @@
 #include "EvilPortal.h"
+#include "esp_idf_version.h"
 
 char apName[MAX_AP_NAME_SIZE] = "PORTAL";
 
@@ -340,6 +341,23 @@ void EvilPortal::startAP() {
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
   WiFi.softAP(apName);
+
+  // Hand the client the portal URL directly via the DHCP captive-portal option
+  // (RFC 8910). On older ESP32 cores the softAP DHCP advertised itself as the
+  // client's DNS server by default, so upstream's DNS-hijack-only portal popped
+  // automatically; on this ESP32-C5 / IDF 5.5 core it no longer does, so the
+  // phone connects, never queries our DNS, and shows "connected, no portal"
+  // (observed: HTML loads but the portal receives zero requests). This is the
+  // Arduino core's OWN routine -- it checks the AP is started and manages the
+  // DHCP stop/start on the core's own netif handle, so it is safe (unlike the
+  // manual esp_netif surgery that crashed). Retry briefly until the AP reports
+  // started; it returns false (no-op) until then, never crashing.
+  #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 2)
+    for (int i = 0; i < 40; i++) {
+      if (WiFi.AP.enableDhcpCaptivePortal()) break;
+      delay(25);
+    }
+  #endif
 
   #ifndef MARAUDER_V8
     Serial.print(F("ap ip address: "));
