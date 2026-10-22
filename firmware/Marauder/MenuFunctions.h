@@ -213,6 +213,7 @@ class MenuFunctions
     #endif
     Menu badusbMenu;
     Menu deviceMenu;
+    Menu bleConfirmMenu;   // Ported from Marauder Eternal: authorize-action confirm screen
 
     // Device menu stuff
     //Menu whichUpdateMenu;
@@ -403,6 +404,9 @@ class MenuFunctions
     void updateStatusBar();
     void buildButtons(Menu* menu, int starting_index = 0, const char* button_name = nullptr);
     void changeMenu(Menu* menu, bool simple_change = false);
+    // Ported from Marauder Eternal: show a Cancel / Run(Authorized) confirm
+    // screen, run `action` on confirm, then return to `returnMenu`.
+    void confirmAction(const char* title, Menu* returnMenu, std::function<void()> action);
     void drawStatusBar();
     void displayCurrentMenu(int start_index = 0);
     #ifndef HAS_MINI_SCREEN

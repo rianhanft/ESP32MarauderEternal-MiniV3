@@ -8,6 +8,8 @@
 #include "BLEDeviceDetectors.h"    // Ported from Marauder Eternal (BLE device sniffers)
 #include "WirelessActivityTools.h" // Ported from Marauder Eternal (WiFi Jam Detector)
 #include "WiFiCameraDetector.h"    // Ported from Marauder Eternal (WiFi Camera scanner)
+#include "DroneRemoteID.h"         // Ported from Marauder Eternal (Drone Remote ID scan/export)
+#include "DroneRemoteIDSpoofer.h"  // Ported from Marauder Eternal (Drone Spoof)
 #if defined(HAS_CSI_MOTION)
   #include "CsiMotionMonitor.h"
 #endif
@@ -2257,6 +2259,7 @@ void MenuFunctions::RunSetup()
   failedUpdateMenu.list = new LinkedList<MenuNode>();
   confirmMenu.list = new LinkedList<MenuNode>();
   updateMenu.list = new LinkedList<MenuNode>();
+  bleConfirmMenu.list = new LinkedList<MenuNode>();  // ported from Marauder Eternal
   settingsMenu.list = new LinkedList<MenuNode>();
   specSettingMenu.list = new LinkedList<MenuNode>();
   geofenceMenu.list = new LinkedList<MenuNode>();
@@ -4749,6 +4752,18 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         WirelessActivityTools::runJamDetector(); // ported from Marauder Eternal
         this->changeMenu(&wifiSnifferMenu, true);
       });
+      this->addNodes(menu, "RF Scanner", TFTCYAN, SCANNERS, [this]() {
+        WirelessActivityTools::runScanner();     // ported from Marauder Eternal
+        this->changeMenu(&wifiSnifferMenu, true);
+      });
+      this->addNodes(menu, "Drone Remote ID", TFTORANGE, SCANNERS, [this]() {
+        DroneRemoteID::run();                    // ported from Marauder Eternal
+        this->changeMenu(&wifiSnifferMenu, true);
+      });
+      this->addNodes(menu, "Remote ID Exports", TFTCYAN, SD_UPDATE, [this]() {
+        DroneRemoteID::exportRetained();         // ported from Marauder Eternal
+        this->changeMenu(&wifiSnifferMenu, true);
+      });
       this->addNodes(menu, "Camera Detect", TFTCYAN, SCANNERS, [this]() {
         WiFiCameraDetector::run();                   // ported from Marauder Eternal
         this->changeMenu(&wifiSnifferMenu, true);
@@ -4907,6 +4922,19 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
     case MenuBuildKind::WIFI_ATTACK:
       this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this]() {
         this->changeMenu(wifiAttackMenu.parentMenu, true);
+      });
+      this->addNodes(menu, "Drone Spoof", TFTRED, ATTACKS, [this]() {
+        // Ported from Marauder Eternal: replay a captured Remote ID identity.
+        DroneRemoteID::CapturedDrone target{};
+        if (!DroneRemoteID::selectCapturedForSpoof(target) ||
+            !DroneRemoteIDSpoofer::selectTarget(target)) {
+          display_obj.init();
+          this->changeMenu(&wifiAttackMenu, true);
+          return;
+        }
+        this->confirmAction("Authorize Drone Spoof", &wifiAttackMenu, []() {
+          DroneRemoteIDSpoofer::run();
+        });
       });
       this->addNodes(menu, text_table1[50], TFTRED, BEACON_LIST, [this]() {
         display_obj.clearScreen();
@@ -5302,6 +5330,24 @@ void MenuFunctions::addNodes(Menu * menu, const char* name, uint8_t color, int p
 {
   //Serial.println("Building node: " + name);
   menu->list->add(MenuNode{String(name), false, color, place, selected, callable});
+}
+
+// Ported from Marauder Eternal: a reusable Cancel / Run(Authorized) confirm
+// screen used by attack features (Drone Spoof, etc.).
+void MenuFunctions::confirmAction(const char* title, Menu* returnMenu,
+                                  std::function<void()> action) {
+  bleConfirmMenu.list->clear();
+  bleConfirmMenu.name = title;
+  bleConfirmMenu.parentMenu = returnMenu;
+  this->addNodes(&bleConfirmMenu, "Cancel", TFTLIGHTGREY, 0, [this]() {
+    this->changeMenu(bleConfirmMenu.parentMenu, true);
+  });
+  this->addNodes(&bleConfirmMenu, "Run (Authorized)", TFTRED, ATTACKS, [this, action]() {
+    action();
+    display_obj.init();
+    this->changeMenu(bleConfirmMenu.parentMenu, true);
+  });
+  this->changeMenu(&bleConfirmMenu, true);
 }
 
 void MenuFunctions::setGraphScale(float scale) {

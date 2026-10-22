@@ -12,9 +12,8 @@
 
 #include "configs.h"
 
-#if defined(MARAUDER_MINI_V3) && defined(HAS_BT) && \
-    defined(HAS_NIMBLE_2) && defined(HAS_SCREEN) && \
-    defined(HAS_BUTTONS) && (C_BTN >= 0)
+#if defined(HAS_BT) && defined(HAS_NIMBLE_2) && defined(HAS_SCREEN) && ( \
+      (defined(HAS_BUTTONS) && (C_BTN >= 0)) || defined(HAS_TOUCH) )
 
 #include <NimBLEDevice.h>
 #include <WiFi.h>

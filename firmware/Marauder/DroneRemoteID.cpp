@@ -18,10 +18,10 @@
 
 #include "configs.h"
 
-#if defined(MARAUDER_MINI_V3) && defined(HAS_BT) && \
-    defined(HAS_NIMBLE_2) && defined(HAS_SCREEN) && \
-    defined(HAS_BUTTONS) && (U_BTN >= 0) && (D_BTN >= 0) && \
-    (L_BTN >= 0) && (R_BTN >= 0) && (C_BTN >= 0)
+#if defined(HAS_BT) && defined(HAS_NIMBLE_2) && defined(HAS_SCREEN) && ( \
+      (defined(HAS_BUTTONS) && (U_BTN >= 0) && (D_BTN >= 0) && \
+       (L_BTN >= 0) && (R_BTN >= 0) && (C_BTN >= 0)) \
+      || defined(HAS_TOUCH) )
 
 #include <NimBLEDevice.h>
 #include <WiFi.h>
@@ -437,7 +437,7 @@ void drawDetailTo(Canvas& canvas, const Drone& drone, uint8_t page, bool preview
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
     canvas.drawString(String(drone.messageRate, 1) + " msg/s #" + String(drone.messageCount), 2, 34, 1);
     canvas.drawString("Lost:" + String(drone.lostCount) + " Back:" + String(drone.reacquiredCount), 2, 48, 1);
-    if (gps_obj.getFixStatus() && gps_obj.getLastSentenceAgeMs() <= 5000 && drone.locationValid &&
+    if (gps_obj.getFixStatus() && drone.locationValid &&
         uint32_t(millis() - drone.locationSeen) < drone_tracking::kLostMs) {
       const double lat = gps_obj.getLatInt() / 1e6, lon = gps_obj.getLonInt() / 1e6;
       canvas.drawString(String(drone_tracking::distanceMeters(lat, lon, drone.latitude, drone.longitude), 0) + "m from receiver", 2, 62, 1);
