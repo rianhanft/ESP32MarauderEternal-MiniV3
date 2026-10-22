@@ -2000,6 +2000,8 @@ void WiFiScan::RunSetup() {
   multissid_trackers = new LinkedList<MultiSSIDTracker>();
   confirmed_multissid = new LinkedList<ConfirmedMultiSSID>();
   multissid_list_full_reported = false;
+  // for AP scan low-memory reporting (was declared but never initialized)
+  ap_list_full_reported = false;
 
   settings_obj.loadSetting<bool>("ChanHop");
 
@@ -2264,6 +2266,23 @@ bool WiFiScan::isHostAlive(IPAddress ip) {
 
 bool WiFiScan::checkMem(size_t requestedBytes) {
   return marauder::RuntimeMemoryGuard::instance().allow(requestedBytes);
+}
+
+void WiFiScan::noteApListStalled() {
+  // One notice per scan. The memory guard pauses AP additions when free heap is
+  // low OR the largest contiguous block is too small (fragmentation), which can
+  // happen in dense RF even while total free heap looks healthy. Make that
+  // visible so a truncated AP list is understood as a memory limit instead of
+  // reading as "Scan AP is broken / doesn't populate all the way".
+  if (this->ap_list_full_reported)
+    return;
+  this->ap_list_full_reported = true;
+  #ifdef HAS_SCREEN
+    display_obj.queueCriticalLine(
+        "** AP list paused: low memory (" +
+        (String)access_points->size() + " found) **");
+  #endif
+  Serial.println(F("AP list paused: memory guard rejected new AP (low/fragmented heap)"));
 }
 
 int WiFiScan::clearList(uint8_t list_type) {
@@ -4388,6 +4407,9 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
     startPcap("ap");
   else
     startPcap("ap_sta");
+
+  // Fresh scan: allow the low-memory notice to fire again if the heap stalls.
+  this->ap_list_full_reported = false;
 
   this->setLEDMode(MODE_SNIFF);
   #ifdef HAS_SCREEN
@@ -7647,8 +7669,17 @@ void WiFiScan::apSnifferCallbackFull(void* buf, wifi_promiscuous_pkt_type_t type
           ap.man = "";
           ap.last_seen_ms = millis();
 
-          if (!marauder::memoryGuardedAdd(access_points, ap))
+          if (!marauder::memoryGuardedAdd(access_points, ap)) {
             delete ap.stations;
+            wifi_scan_obj.noteApListStalled();
+          }
+        }
+        else {
+          // checkMem() refused up front: free heap is low or too fragmented to
+          // hold another AccessPoint. Report it once per scan instead of
+          // silently dropping APs, so a truncated list reads as a memory limit
+          // rather than looking like the scanner is broken.
+          wifi_scan_obj.noteApListStalled();
         }
 
         Serial.println();

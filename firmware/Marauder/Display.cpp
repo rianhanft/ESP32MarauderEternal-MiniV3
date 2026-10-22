@@ -330,7 +330,7 @@ void Display::drawBootSplash() {
     tft.setTextWrap(false);
     tft.setTextSize(1);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.drawCentreString("ESP32 Marauder", width / 2, 10, 1);
+    tft.drawCentreString("esp32 MarauderBox", width / 2, 10, 1);
     tft.drawCentreString(version_number, width / 2, 27, 1);
     tft.drawCentreString("POOM", width / 2, 44, 1);
     tft.display(true);
@@ -349,7 +349,7 @@ void Display::drawBootSplash() {
   tft.setFreeFont(NULL);
   tft.setTextSize(layout.text_size);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawCentreString("ESP32 Marauder", width / 2, layout.title_y, 1);
+  tft.drawCentreString("esp32 MarauderBox", width / 2, layout.title_y, 1);
 
   const uint32_t source_x_step = layout.logo_width > 1
       ? (static_cast<uint32_t>(JCMK_LOGO_WIDTH - 1) << 8) /
@@ -747,7 +747,15 @@ bool Display::queueLine(const String& line) {
 
 bool Display::queueCriticalLine(const String& line) {
   if (display_buffer == nullptr) return false;
-  if (!display_queue_pressure.allow(display_buffer->size())) return false;
+  // Critical lines (Evil Portal status banner + captured credentials) MUST
+  // stay visible even when the normal scan-line backpressure guard has paused
+  // ordinary queueLine() traffic -- e.g. right after a large AP scan leaves the
+  // display queue near its soft limit. Skip the soft backpressure check that
+  // queueLine() uses and enforce only a hard safety ceiling so a wedged
+  // renderer still can't grow the buffer without bound. Previously this was a
+  // verbatim copy of queueLine(), so "Evil Portal READY" and the u:/p: capture
+  // lines were silently dropped whenever the queue was under pressure.
+  if (display_buffer->size() >= DISPLAY_BUFFER_LIMIT * 3) return false;
   return display_buffer->add(line);
 }
 

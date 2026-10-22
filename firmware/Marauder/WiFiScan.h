@@ -879,6 +879,9 @@ class WiFiScan
     void RunPingScan(uint8_t scan_mode, uint16_t color);
     void RunPortScanAll(uint8_t scan_mode, uint16_t color);
     bool checkMem(size_t requestedBytes = 0);
+    // Emit a one-shot on-screen + serial notice when the memory guard refuses
+    // to add another AccessPoint during a scan (ap_list_full_reported gates it).
+    void noteApListStalled();
     void writeHeader(bool poi = false);
     void writeFooter(bool poi = false);
     void displayWardriveStats();
