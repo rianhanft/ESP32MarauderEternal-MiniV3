@@ -3338,8 +3338,18 @@ void WiFiScan::StopScan(uint8_t scan_mode) {
     // shutdownWiFi() deinits the network stack, so httpd_stop() runs while lwIP
     // is still alive and the next activation starts a clean server. cleanup() is
     // idempotent (the later call below is a no-op once runServer is clear).
-    if (currentScanMode == WIFI_SCAN_EVIL_PORTAL)
+    if (currentScanMode == WIFI_SCAN_EVIL_PORTAL) {
       evil_portal_obj.cleanup();
+      // The Evil Portal runs our own softAP, which WiFiScan::main() records as
+      // wifi_connected = true (softAPIP != 0.0.0.0). That flag makes
+      // shutdownWiFi() skip the full esp_wifi_deinit()/esp_netif_deinit(),
+      // leaving the driver initialized in AP mode. The next scan then re-inits
+      // onto a live driver (esp_wifi_init() no-ops) and never enters
+      // promiscuous mode, so it receives nothing ("can't rescan after an Evil
+      // Portal"). Clear the flag so the radio is fully torn down here -- this is
+      // a softAP we own, not a station link we need to preserve.
+      this->wifi_connected = false;
+    }
 
     this->shutdownWiFi();
 
