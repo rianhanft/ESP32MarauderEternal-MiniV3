@@ -4484,10 +4484,17 @@ void WiFiScan::RunEvilPortal(uint8_t scan_mode, uint16_t color) {
     this->prepareScanStage(TFT_MAGENTA, TFT_BLACK);
   #endif
 
-  #ifdef HAS_IDF_3
-    esp_wifi_init(&cfg);
-  #endif
-
+  // NOTE: do NOT pre-initialize the driver here with esp_wifi_init(&cfg).
+  // evil_portal_obj.begin() -> startAP() brings the softAP up through the
+  // Arduino stack (WiFi.mode(WIFI_AP) + WiFi.softAP()). If the driver is already
+  // initialized when WiFi.mode(WIFI_AP) runs, Arduino's own esp_wifi_init()
+  // returns ESP_ERR_WIFI_INIT_STATE and mode() bails early -- it never reaches
+  // espWiFiStart(), so _esp_wifi_started stays false. On exit, espWiFiStop()
+  // then skips wifiLowLevelDeinit(), which is the ONLY place Arduino destroys
+  // the softAP netif (esp_netif_destroy_default_wifi). That leaked ~11 KB of
+  // internal (DMA) heap per session and starved the next scan's packet RX
+  // ("can't rescan after an Evil Portal"). Letting WiFi.softAP() own the whole
+  // init keeps Arduino's bookkeeping consistent so the netif is freed on exit.
   evil_portal_obj.begin(ssids, access_points);
   this->wifi_initialized = true;
   initTime = millis();
@@ -4566,11 +4573,6 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
     Serial.printf("[scan-dbg] init=%d mode=%d prom=%d fi=%uk pk=%uk fp=%uk ps=%d\n",
                   (int)_init_rc, (int)_m, _prom ? 1 : 0, _fi,
                   this->dbg_peak_free_kb, _fp, this->list_in_psram ? 1 : 0);
-    #ifdef HAS_SCREEN
-      display_obj.queueCriticalLine("dbg fi=" + String(_fi) + "k pk=" +
-          String(this->dbg_peak_free_kb) + "k fp=" + String(_fp) + "k ps=" +
-          String(this->list_in_psram ? 1 : 0));
-    #endif
   }
 
   initTime = millis();
@@ -7052,11 +7054,6 @@ void WiFiScan::RunBeaconScan(uint8_t scan_mode, uint16_t color) {
       unsigned _free = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
       Serial.printf("[beacon-dbg] init=%d mode=%d prom=%d free=%uk\n",
                     (int)_init_rc, (int)_m, _prom ? 1 : 0, _free);
-      #ifdef HAS_SCREEN
-        display_obj.queueCriticalLine("dbg i=" + String((int)_init_rc) +
-            " m=" + String((int)_m) + " p=" + String(_prom ? 1 : 0) +
-            " free=" + String(_free) + "k");
-      #endif
     }
   }
   this->wifi_initialized = true;
