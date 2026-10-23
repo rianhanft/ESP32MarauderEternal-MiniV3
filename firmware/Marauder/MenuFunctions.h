@@ -126,6 +126,11 @@ enum class MenuBuildKind : uint8_t {
   WIFI_GENERAL,
   BLUETOOTH_SNIFFER,
   BLUETOOTH_ATTACK,
+  // NyanBox: consolidated Marauder Eternal features, grouped by category.
+  NYANBOX_ROOT,
+  NYANBOX_SNIFFERS,
+  NYANBOX_ATTACKS,
+  NYANBOX_BLE,
 };
 
 // Individual Nodes of a menu
@@ -214,6 +219,11 @@ class MenuFunctions
     Menu badusbMenu;
     Menu deviceMenu;
     Menu bleConfirmMenu;   // Ported from Marauder Eternal: authorize-action confirm screen
+    // NyanBox: top-level menu consolidating the ported Marauder Eternal features.
+    Menu nyanBoxMenu;
+    Menu nyanSnifferMenu;
+    Menu nyanAttackMenu;
+    Menu nyanBleMenu;
 
     // Device menu stuff
     //Menu whichUpdateMenu;

@@ -2256,6 +2256,21 @@ void MenuFunctions::RunSetup()
     }
   #endif
 
+  // NyanBox menus: top-level category consolidating the ported Marauder Eternal
+  // features. Lazy-built (buildLazyMenu allocates the list), so no eager list.
+  nyanBoxMenu.buildKind = MenuBuildKind::NYANBOX_ROOT;
+  nyanSnifferMenu.buildKind = MenuBuildKind::NYANBOX_SNIFFERS;
+  nyanAttackMenu.buildKind = MenuBuildKind::NYANBOX_ATTACKS;
+  nyanBleMenu.buildKind = MenuBuildKind::NYANBOX_BLE;
+  nyanBoxMenu.name = "NyanBox";
+  nyanSnifferMenu.name = "Sniffers";
+  nyanAttackMenu.name = "Attacks";
+  nyanBleMenu.name = "BLE Detectors";
+  nyanBoxMenu.parentMenu = &mainMenu;
+  nyanSnifferMenu.parentMenu = &nyanBoxMenu;
+  nyanAttackMenu.parentMenu = &nyanBoxMenu;
+  nyanBleMenu.parentMenu = &nyanBoxMenu;
+
   // Device menu stuff
   failedUpdateMenu.list = new LinkedList<MenuNode>();
   confirmMenu.list = new LinkedList<MenuNode>();
@@ -4630,6 +4645,9 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
           });
         }
       #endif
+      this->addNodes(menu, "NyanBox", TFTMAGENTA, GENERAL_APPS, [this]() {
+        this->changeMenu(&nyanBoxMenu, true);
+      });
       this->addNodes(menu, text_table1[9], TFTBLUE, DEVICE, [this]() {
         this->changeMenu(&deviceMenu, true);
       });
@@ -4745,30 +4763,6 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
       this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this]() {
         this->changeMenu(wifiSnifferMenu.parentMenu, true);
       });
-      this->addNodes(menu, "Device Scout", TFTGREEN, SCANNERS, [this]() {
-        WirelessDeviceScout::run();              // ported from Marauder Eternal
-        this->changeMenu(&wifiSnifferMenu, true);
-      });
-      this->addNodes(menu, "Jam Detector", TFTRED, SCANNERS, [this]() {
-        WirelessActivityTools::runJamDetector(); // ported from Marauder Eternal
-        this->changeMenu(&wifiSnifferMenu, true);
-      });
-      this->addNodes(menu, "RF Scanner", TFTCYAN, SCANNERS, [this]() {
-        WirelessActivityTools::runScanner();     // ported from Marauder Eternal
-        this->changeMenu(&wifiSnifferMenu, true);
-      });
-      this->addNodes(menu, "Drone Remote ID", TFTORANGE, SCANNERS, [this]() {
-        DroneRemoteID::run();                    // ported from Marauder Eternal
-        this->changeMenu(&wifiSnifferMenu, true);
-      });
-      this->addNodes(menu, "Remote ID Exports", TFTCYAN, SD_UPDATE, [this]() {
-        DroneRemoteID::exportRetained();         // ported from Marauder Eternal
-        this->changeMenu(&wifiSnifferMenu, true);
-      });
-      this->addNodes(menu, "Camera Detect", TFTCYAN, SCANNERS, [this]() {
-        WiFiCameraDetector::run();                   // ported from Marauder Eternal
-        this->changeMenu(&wifiSnifferMenu, true);
-      });
       this->addNodes(menu, text_table1[42], TFTCYAN, PROBE_SNIFF, [this]() {
         display_obj.clearScreen();
         this->drawStatusBar();
@@ -4783,28 +4777,6 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         display_obj.clearScreen();
         this->drawStatusBar();
         wifi_scan_obj.StartScan(WIFI_SCAN_DEAUTH, TFT_RED);
-      });
-      this->addNodes(menu, "Remote ID Scan", TFTCYAN, SCANNERS, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(REMOTE_ID_SCAN_ALL, TFT_CYAN);
-      });
-      this->addNodes(menu, "Remote ID Devices", TFTMAGENTA, SCANNERS, [this]() {
-        remoteIdMenu.list->clear();
-        remoteIdMenu.parentMenu = &wifiSnifferMenu;
-        this->addNodes(&remoteIdMenu, text09, TFTLIGHTGREY, 0, [this]() {
-          this->changeMenu(remoteIdMenu.parentMenu, true);
-        });
-        for (size_t i = 0; i < wifi_scan_obj.remoteIdCount(); ++i) {
-          String label = wifi_scan_obj.remoteIdLabel(i);
-          this->addNodes(&remoteIdMenu, label.c_str(), TFTCYAN, SCANNERS, [this, i]() {
-            if (!wifi_scan_obj.selectRemoteIdTarget(i)) return;
-            display_obj.clearScreen();
-            this->drawStatusBar();
-            wifi_scan_obj.StartScan(REMOTE_ID_SCAN_TARGET, TFT_MAGENTA);
-          });
-        }
-        this->changeMenu(&remoteIdMenu, true);
       });
       this->addNodes(menu, "Packet Count", TFTORANGE, PACKET_MONITOR, [this]() {
         display_obj.clearScreen();
@@ -4923,32 +4895,6 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
     case MenuBuildKind::WIFI_ATTACK:
       this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this]() {
         this->changeMenu(wifiAttackMenu.parentMenu, true);
-      });
-      this->addNodes(menu, "Drone Spoof", TFTRED, ATTACKS, [this]() {
-        // Ported from Marauder Eternal: replay a captured Remote ID identity.
-        DroneRemoteID::CapturedDrone target{};
-        if (!DroneRemoteID::selectCapturedForSpoof(target) ||
-            !DroneRemoteIDSpoofer::selectTarget(target)) {
-          display_obj.init();
-          this->changeMenu(&wifiAttackMenu, true);
-          return;
-        }
-        this->confirmAction("Authorize Drone Spoof", &wifiAttackMenu, []() {
-          DroneRemoteIDSpoofer::run();
-        });
-      });
-      this->addNodes(menu, "Camera Deauther", TFTRED, DEAUTH_SNIFF, [this]() {
-        // Ported from Marauder Eternal: deauth confirmed camera links.
-        static WiFiCameraDetector::DeauthTarget target{};
-        if (!WiFiCameraDetector::selectDeauthTarget(target)) {
-          display_obj.init();
-          this->changeMenu(&wifiAttackMenu, true);
-          return;
-        }
-        wifi_scan_obj.setCameraDeauthTargets(target);
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_CAMERA_DEAUTH, TFT_RED);
       });
       this->addNodes(menu, text_table1[50], TFTRED, BEACON_LIST, [this]() {
         display_obj.clearScreen();
@@ -5111,32 +5057,6 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this]() {
           this->changeMenu(bluetoothSnifferMenu.parentMenu, true);
         });
-        // --- Ported from Marauder Eternal: BLE device-type sniffers ---
-        this->addNodes(menu, "Meshtastic Sniff", TFTGREEN, BLUETOOTH_SNIFF, [this]() {
-          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::Meshtastic);
-          this->changeMenu(&bluetoothSnifferMenu, true);
-        });
-        this->addNodes(menu, "MeshCore Sniff", TFTCYAN, BLUETOOTH_SNIFF, [this]() {
-          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::MeshCore);
-          this->changeMenu(&bluetoothSnifferMenu, true);
-        });
-        this->addNodes(menu, "SmartTag Sniff", TFTYELLOW, BLUETOOTH_SNIFF, [this]() {
-          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::SmartTag);
-          this->changeMenu(&bluetoothSnifferMenu, true);
-        });
-        this->addNodes(menu, "Tile Sniff", TFTORANGE, BLUETOOTH_SNIFF, [this]() {
-          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::Tile);
-          this->changeMenu(&bluetoothSnifferMenu, true);
-        });
-        this->addNodes(menu, "Axon Sniff", TFTRED, BLUETOOTH_SNIFF, [this]() {
-          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::Axon);
-          this->changeMenu(&bluetoothSnifferMenu, true);
-        });
-        this->addNodes(menu, "NyanBOX Sniff", TFTMAGENTA, BLUETOOTH_SNIFF, [this]() {
-          BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::NyanBox);
-          this->changeMenu(&bluetoothSnifferMenu, true);
-        });
-        // --- end Eternal BLE sniffers ---
         this->addNodes(menu, text_table1[34], TFTGREEN, BLUETOOTH_SNIFF, [this]() {
           display_obj.clearScreen();
           this->drawStatusBar();
@@ -5323,6 +5243,136 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
           this->changeMenu(&gpsPOIMenu, true);
         });
         break;
+    #endif
+
+    // ===== NyanBox: consolidated Marauder Eternal features =====
+    case MenuBuildKind::NYANBOX_ROOT:
+      this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this]() {
+        this->changeMenu(nyanBoxMenu.parentMenu, true);
+      });
+      this->addNodes(menu, "Sniffers", TFTYELLOW, SNIFFERS, [this]() {
+        this->changeMenu(&nyanSnifferMenu, true);
+      });
+      this->addNodes(menu, "Attacks", TFTRED, ATTACKS, [this]() {
+        this->changeMenu(&nyanAttackMenu, true);
+      });
+      #ifdef HAS_BT
+        this->addNodes(menu, "BLE Detectors", TFTCYAN, SCANNERS, [this]() {
+          this->changeMenu(&nyanBleMenu, true);
+        });
+      #endif
+      break;
+
+    case MenuBuildKind::NYANBOX_SNIFFERS:
+      this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this]() {
+        this->changeMenu(nyanSnifferMenu.parentMenu, true);
+      });
+      this->addNodes(menu, "Device Scout", TFTGREEN, SCANNERS, [this]() {
+        WirelessDeviceScout::run();              // ported from Marauder Eternal
+        this->changeMenu(&nyanSnifferMenu, true);
+      });
+      this->addNodes(menu, "Jam Detector", TFTRED, SCANNERS, [this]() {
+        WirelessActivityTools::runJamDetector(); // ported from Marauder Eternal
+        this->changeMenu(&nyanSnifferMenu, true);
+      });
+      this->addNodes(menu, "Camera Detect", TFTCYAN, SCANNERS, [this]() {
+        WiFiCameraDetector::run();                // ported from Marauder Eternal
+        this->changeMenu(&nyanSnifferMenu, true);
+      });
+      this->addNodes(menu, "Drone Remote ID", TFTORANGE, SCANNERS, [this]() {
+        DroneRemoteID::run();                     // ported from Marauder Eternal
+        this->changeMenu(&nyanSnifferMenu, true);
+      });
+      this->addNodes(menu, "Remote ID Scan", TFTCYAN, SCANNERS, [this]() {
+        display_obj.clearScreen();
+        this->drawStatusBar();
+        wifi_scan_obj.StartScan(REMOTE_ID_SCAN_ALL, TFT_CYAN);
+      });
+      this->addNodes(menu, "Remote ID Devices", TFTMAGENTA, SCANNERS, [this]() {
+        remoteIdMenu.list->clear();
+        remoteIdMenu.parentMenu = &nyanSnifferMenu;
+        this->addNodes(&remoteIdMenu, text09, TFTLIGHTGREY, 0, [this]() {
+          this->changeMenu(remoteIdMenu.parentMenu, true);
+        });
+        for (size_t i = 0; i < wifi_scan_obj.remoteIdCount(); ++i) {
+          String label = wifi_scan_obj.remoteIdLabel(i);
+          this->addNodes(&remoteIdMenu, label.c_str(), TFTCYAN, SCANNERS, [this, i]() {
+            if (!wifi_scan_obj.selectRemoteIdTarget(i)) return;
+            display_obj.clearScreen();
+            this->drawStatusBar();
+            wifi_scan_obj.StartScan(REMOTE_ID_SCAN_TARGET, TFT_MAGENTA);
+          });
+        }
+        this->changeMenu(&remoteIdMenu, true);
+      });
+      this->addNodes(menu, "Remote ID Exports", TFTCYAN, SD_UPDATE, [this]() {
+        DroneRemoteID::exportRetained();          // ported from Marauder Eternal
+        this->changeMenu(&nyanSnifferMenu, true);
+      });
+      break;
+
+    case MenuBuildKind::NYANBOX_ATTACKS:
+      this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this]() {
+        this->changeMenu(nyanAttackMenu.parentMenu, true);
+      });
+      this->addNodes(menu, "Camera Deauther", TFTRED, DEAUTH_SNIFF, [this]() {
+        // Ported from Marauder Eternal: deauth confirmed camera links.
+        static WiFiCameraDetector::DeauthTarget target{};
+        if (!WiFiCameraDetector::selectDeauthTarget(target)) {
+          display_obj.init();
+          this->changeMenu(&nyanAttackMenu, true);
+          return;
+        }
+        wifi_scan_obj.setCameraDeauthTargets(target);
+        display_obj.clearScreen();
+        this->drawStatusBar();
+        wifi_scan_obj.StartScan(WIFI_ATTACK_CAMERA_DEAUTH, TFT_RED);
+      });
+      this->addNodes(menu, "Drone Spoof", TFTRED, ATTACKS, [this]() {
+        // Ported from Marauder Eternal: replay a captured Remote ID identity.
+        DroneRemoteID::CapturedDrone target{};
+        if (!DroneRemoteID::selectCapturedForSpoof(target) ||
+            !DroneRemoteIDSpoofer::selectTarget(target)) {
+          display_obj.init();
+          this->changeMenu(&nyanAttackMenu, true);
+          return;
+        }
+        this->confirmAction("Authorize Drone Spoof", &nyanAttackMenu, []() {
+          DroneRemoteIDSpoofer::run();
+        });
+      });
+      break;
+
+    #ifdef HAS_BT
+    case MenuBuildKind::NYANBOX_BLE:
+      this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this]() {
+        this->changeMenu(nyanBleMenu.parentMenu, true);
+      });
+      this->addNodes(menu, "Meshtastic Sniff", TFTGREEN, BLUETOOTH_SNIFF, [this]() {
+        BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::Meshtastic);
+        this->changeMenu(&nyanBleMenu, true);
+      });
+      this->addNodes(menu, "MeshCore Sniff", TFTCYAN, BLUETOOTH_SNIFF, [this]() {
+        BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::MeshCore);
+        this->changeMenu(&nyanBleMenu, true);
+      });
+      this->addNodes(menu, "SmartTag Sniff", TFTYELLOW, BLUETOOTH_SNIFF, [this]() {
+        BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::SmartTag);
+        this->changeMenu(&nyanBleMenu, true);
+      });
+      this->addNodes(menu, "Tile Sniff", TFTORANGE, BLUETOOTH_SNIFF, [this]() {
+        BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::Tile);
+        this->changeMenu(&nyanBleMenu, true);
+      });
+      this->addNodes(menu, "Axon Sniff", TFTRED, BLUETOOTH_SNIFF, [this]() {
+        BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::Axon);
+        this->changeMenu(&nyanBleMenu, true);
+      });
+      this->addNodes(menu, "NyanBOX Sniff", TFTMAGENTA, BLUETOOTH_SNIFF, [this]() {
+        BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::NyanBox);
+        this->changeMenu(&nyanBleMenu, true);
+      });
+      break;
     #endif
 
     case MenuBuildKind::EAGER:
