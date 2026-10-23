@@ -903,6 +903,14 @@ class WiFiScan
 
 
   public:
+    // Temporarily route generic heap allocations (>16 B) to PSRAM, then restore
+    // the stock C5 policy. Used to build large menus (e.g. the Evil Portal AP
+    // picker, one node per scanned AP) in PSRAM so they do not consume the
+    // internal (DMA) heap the softAP and the next scan's Wi-Fi init need.
+    // Call endExtmemAlloc() before any rendering -- the TFT needs DMA memory.
+    void beginExtmemAlloc();
+    void endExtmemAlloc();
+
     struct FoxHuntTarget {
       uint8_t mac[6] = {};
       String name = "";

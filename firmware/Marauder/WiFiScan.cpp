@@ -2318,6 +2318,28 @@ void WiFiScan::enableApListPsram() {
 #endif
 }
 
+void WiFiScan::beginExtmemAlloc() {
+#ifdef HAS_PSRAM
+  // Route generic allocations (>16 B) to PSRAM for the duration of a build that
+  // would otherwise crowd the internal (DMA) heap -- e.g. the Evil Portal AP
+  // picker, which allocates one menu node + label String per scanned AP. With a
+  // long AP list those nodes otherwise left too little internal heap for the
+  // softAP to accept a client ("phone won't join") and for the next scan's
+  // esp_wifi_init ("rescan finds nothing"). Must be paired with endExtmemAlloc()
+  // BEFORE any rendering, since the TFT needs DMA-capable internal memory.
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) == 0)
+    return;
+  heap_caps_malloc_extmem_enable(16);
+#endif
+}
+
+void WiFiScan::endExtmemAlloc() {
+#ifdef HAS_PSRAM
+  // Restore the stock C5 malloc policy (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL).
+  heap_caps_malloc_extmem_enable(4096);
+#endif
+}
+
 void WiFiScan::noteApListStalled() {
   // One concise notice per scan when the AP list stops accepting entries (it is
   // full at the cap, or -- on non-PSRAM builds -- the memory guard paused it).

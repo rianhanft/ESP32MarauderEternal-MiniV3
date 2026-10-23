@@ -4932,6 +4932,12 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         this->addNodes(&ssidsMenu, text09, TFTLIGHTGREY, 0, [this]() {
           this->changeMenu(ssidsMenu.parentMenu, true);
         });
+        // Build the pickers with their node/label allocations in PSRAM, not the
+        // internal (DMA) heap: one node per scanned AP otherwise starves the
+        // softAP (phone can't join) and the next scan's Wi-Fi init (rescan finds
+        // nothing) when the AP list is long. Restored before changeMenu() below
+        // so rendering keeps using DMA-capable internal memory.
+        wifi_scan_obj.beginExtmemAlloc();
         for (int i = 0; i < access_points->size(); i++) {
           const String label = screenName(access_points->get(i).essid);
           this->addNodes(&wifiAPMenu, label.c_str(), TFTCYAN, 255, [this, i]() {
@@ -4962,6 +4968,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
               this->changeMenu(&evilPortalMenu, true);
           });
         }
+        wifi_scan_obj.endExtmemAlloc();
         this->changeMenu(&evilPortalMenu, true);
       });
       this->addNodes(menu, text_table1[54], TFTRED, DEAUTH_SNIFF, [this]() {
