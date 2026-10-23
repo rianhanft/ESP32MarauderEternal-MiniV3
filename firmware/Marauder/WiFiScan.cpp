@@ -3932,6 +3932,23 @@ void WiFiScan::startGPX(const char* file_name) {
 
 void WiFiScan::setupScanDisplayArea(uint16_t background, uint16_t color) {
   #ifdef HAS_SCREEN
+    // Start every scan from a clean display state. The Evil Portal feeds its
+    // status lines into the SAME display buffer the live scan list uses
+    // (queueCriticalLine) and toggles printing/loading. If any of that is left
+    // over when the next scan starts, the scan's list never renders -- the
+    // screen stays black even though APs are being received and added (which is
+    // why recon, drawing its own UI, still works after a portal while the normal
+    // Scan AP screen went blank). Clear the buffers and flags here.
+    display_obj.printing = false;
+    display_obj.loading = false;
+    if (display_obj.display_buffer)
+      while (display_obj.display_buffer->size() > 0)
+        display_obj.display_buffer->shift();
+    #ifdef SCREEN_BUFFER
+      if (display_obj.screen_buffer)
+        while (display_obj.screen_buffer->size() > 0)
+          display_obj.screen_buffer->shift();
+    #endif
     display_obj.TOP_FIXED_AREA_2 = 48;
     display_obj.tteBar = true;
     display_obj.print_delay_1 = 15;
