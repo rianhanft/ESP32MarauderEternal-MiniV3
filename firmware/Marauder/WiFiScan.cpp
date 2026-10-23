@@ -4562,13 +4562,13 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
     esp_wifi_get_promiscuous(&_prom);
     unsigned _fi = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
     unsigned _fp = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
-    Serial.printf("[scan-dbg] init=%d mode=%d prom=%d fi=%uk fp=%uk ps=%d\n",
-                  (int)_init_rc, (int)_m, _prom ? 1 : 0, _fi, _fp,
-                  this->list_in_psram ? 1 : 0);
+    if (_fi > this->dbg_peak_free_kb) this->dbg_peak_free_kb = _fi;
+    Serial.printf("[scan-dbg] init=%d mode=%d prom=%d fi=%uk pk=%uk fp=%uk ps=%d\n",
+                  (int)_init_rc, (int)_m, _prom ? 1 : 0, _fi,
+                  this->dbg_peak_free_kb, _fp, this->list_in_psram ? 1 : 0);
     #ifdef HAS_SCREEN
-      display_obj.queueCriticalLine("dbg i=" + String((int)_init_rc) +
-          " m=" + String((int)_m) + " p=" + String(_prom ? 1 : 0) +
-          " fi=" + String(_fi) + "k fp=" + String(_fp) + "k ps=" +
+      display_obj.queueCriticalLine("dbg fi=" + String(_fi) + "k pk=" +
+          String(this->dbg_peak_free_kb) + "k fp=" + String(_fp) + "k ps=" +
           String(this->list_in_psram ? 1 : 0));
     #endif
   }

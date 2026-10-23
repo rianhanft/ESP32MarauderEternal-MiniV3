@@ -628,6 +628,9 @@ class WiFiScan
     // applyScanHeapPolicy for AP-list scans). The AP-add path then gates on
     // PSRAM free instead of the internal-heap memory guard.
     bool list_in_psram = false;
+    // Temporary: highest internal (DMA) free seen at scan init, so one on-screen
+    // reading shows the healthy baseline and any post-Evil-Portal drop.
+    unsigned dbg_peak_free_kb = 0;
     // Upper bound on the AP list when it lives in PSRAM, to keep the UI and
     // attack loops that iterate it responsive. PSRAM itself holds far more.
     static const int AP_LIST_PSRAM_CAP = 300;
