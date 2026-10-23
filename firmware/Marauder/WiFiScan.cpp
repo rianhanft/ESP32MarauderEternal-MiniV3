@@ -7676,8 +7676,15 @@ void WiFiScan::apSnifferCallbackFull(void* buf, wifi_promiscuous_pkt_type_t type
       //}
     }
 
-    // We got an AP. Check if in list and add if not
-    if ((snifferPacket->payload[0] == 0x80) && (buf == 0))
+    // We got an AP. Check if in list and add if not.
+    // NOTE: the list-add is intentionally NOT gated on the display buffer being
+    // empty (buf == 0). It used to be, which coupled AP capture to the on-screen
+    // list draining -- and after an Evil Portal the scan list stopped populating
+    // because the display buffer never drained back to empty, so every beacon was
+    // dropped. Recon worked because it suppresses the scan UI (buf stays 0). Now
+    // the AP is always captured; only the queueLine() below (which writes the
+    // shared display buffer) stays guarded by buf == 0 to avoid the heap race.
+    if (snifferPacket->payload[0] == 0x80)
     {
       // Get security info
       uint8_t security_type = wifi_scan_obj.getSecurityType(snifferPacket->payload, len);
@@ -7744,10 +7751,12 @@ void WiFiScan::apSnifferCallbackFull(void* buf, wifi_promiscuous_pkt_type_t type
         Serial.print(F(" "));
 
         #ifdef HAS_SCREEN
-          if (!recon_obj.suppressScanUi())
+          // Only write the shared display buffer when it is empty (heap race
+          // guard, see comment above); the AP itself is captured regardless.
+          if ((buf == 0) && !recon_obj.suppressScanUi())
             display_obj.queueLine(display_string);
         #endif
-        
+
         if (essid == "") {
           essid = bssid;
           Serial.print(essid + " ");

@@ -782,8 +782,13 @@ void Display::processAndPrintString(TFT_eSPI& tft, const String& originalString)
 bool Display::queueLine(const String& line) {
   if (display_buffer == nullptr) return false;
   if (!display_queue_pressure.allow(display_buffer->size())) return false;
-  if (!marauder::RuntimeMemoryGuard::instance().allow(line.length() + 48))
-    return false;
+  // NOTE: do NOT gate this on the internal-heap RuntimeMemoryGuard. During an AP
+  // scan these display lines are allocated in PSRAM (the list is PSRAM-routed),
+  // so checking INTERNAL free here wrongly dropped every scan line after an Evil
+  // Portal left internal heap low -- the scan screen went black ("no SSIDs after
+  // a portal") even though the AP list was still building fine (which is why
+  // recon, with its own suppressed UI, kept working). The backpressure check
+  // above already bounds the display buffer by size.
   return display_buffer->add(line);
 }
 
