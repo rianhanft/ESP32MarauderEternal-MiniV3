@@ -3338,18 +3338,8 @@ void WiFiScan::StopScan(uint8_t scan_mode) {
     // shutdownWiFi() deinits the network stack, so httpd_stop() runs while lwIP
     // is still alive and the next activation starts a clean server. cleanup() is
     // idempotent (the later call below is a no-op once runServer is clear).
-    if (currentScanMode == WIFI_SCAN_EVIL_PORTAL) {
+    if (currentScanMode == WIFI_SCAN_EVIL_PORTAL)
       evil_portal_obj.cleanup();
-      // The Evil Portal runs our own softAP, which WiFiScan::main() records as
-      // wifi_connected = true (softAPIP != 0.0.0.0). That flag makes
-      // shutdownWiFi() skip the full esp_wifi_deinit()/esp_netif_deinit(),
-      // leaving the driver initialized in AP mode. The next scan then re-inits
-      // onto a live driver (esp_wifi_init() no-ops) and never enters
-      // promiscuous mode, so it receives nothing ("can't rescan after an Evil
-      // Portal"). Clear the flag so the radio is fully torn down here -- this is
-      // a softAP we own, not a station link we need to preserve.
-      this->wifi_connected = false;
-    }
 
     this->shutdownWiFi();
 
@@ -4484,17 +4474,14 @@ void WiFiScan::RunEvilPortal(uint8_t scan_mode, uint16_t color) {
     this->prepareScanStage(TFT_MAGENTA, TFT_BLACK);
   #endif
 
-  // NOTE: do NOT pre-initialize the driver here with esp_wifi_init(&cfg).
-  // evil_portal_obj.begin() -> startAP() brings the softAP up through the
-  // Arduino stack (WiFi.mode(WIFI_AP) + WiFi.softAP()). If the driver is already
-  // initialized when WiFi.mode(WIFI_AP) runs, Arduino's own esp_wifi_init()
-  // returns ESP_ERR_WIFI_INIT_STATE and mode() bails early -- it never reaches
-  // espWiFiStart(), so _esp_wifi_started stays false. On exit, espWiFiStop()
-  // then skips wifiLowLevelDeinit(), which is the ONLY place Arduino destroys
-  // the softAP netif (esp_netif_destroy_default_wifi). That leaked ~11 KB of
-  // internal (DMA) heap per session and starved the next scan's packet RX
-  // ("can't rescan after an Evil Portal"). Letting WiFi.softAP() own the whole
-  // init keeps Arduino's bookkeeping consistent so the netif is freed on exit.
+  // Stock init: bring up the driver here, exactly as the reference firmware
+  // does, then let evil_portal_obj.begin() -> startAP() configure the softAP.
+  // Keeping this identical to stock is what lets the next scan reconfigure the
+  // (still-initialized) radio in place and repopulate after a portal.
+  #ifdef HAS_IDF_3
+    esp_wifi_init(&cfg);
+  #endif
+
   evil_portal_obj.begin(ssids, access_points);
   this->wifi_initialized = true;
   initTime = millis();
@@ -4527,35 +4514,19 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
     this->prepareScanStage(TFT_GREEN, TFT_BLACK);
   #endif
 
-  // Regenerate the AP list fresh for this scan.
   delete access_points;
   access_points = new LinkedList<AccessPoint>();
-  // Also restart the dual-band channel sweep from the beginning so the first
-  // hops land on 2.4 GHz where most APs live.
-  this->dual_band_channel_index = 0;
 
-  // Start the radio from a guaranteed-clean state. After an Evil Portal the
-  // driver can be left configured such that a plain esp_wifi_init() still
-  // succeeds yet the promiscuous scan receives nothing. Fully stop + deinit
-  // first so any residual mode/filter/netif binding from the portal is cleared
-  // and the scan is rebuilt from scratch -- this is what lets a post-portal
-  // "Scan AP" repopulate. On a normal scan->scan path the driver is already
-  // idle, so these calls simply no-op (their errors are ignored).
-  esp_wifi_stop();
-  esp_wifi_deinit();
-  delay(5);
-
+  // Stock init flow (matches the known-good reference): do NOT force a
+  // stop/deinit here. After an Evil Portal the radio is left initialized in AP
+  // mode (shutdownWiFi() skips teardown while softAPIP is set); esp_wifi_init()
+  // then no-ops and setWiFiMode() reconfigures the live driver into promiscuous
+  // NULL mode in place. This is what lets the scan repopulate after a portal --
+  // tearing the driver down instead left it unable to receive.
   esp_netif_init();
   esp_event_loop_create_default();
 
-  esp_err_t _init_rc = esp_wifi_init(&cfg2);
-  // If init still reports the driver busy, deinit once more and retry.
-  if (_init_rc != ESP_OK) {
-    esp_wifi_stop();
-    esp_wifi_deinit();
-    delay(50);
-    _init_rc = esp_wifi_init(&cfg2);
-  }
+  esp_wifi_init(&cfg2);
   #ifdef HAS_IDF_3
     esp_wifi_set_country(&country);
     esp_event_loop_create_default();
@@ -4564,27 +4535,10 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
   this->changeChannel(this->set_channel);
   this->wifi_initialized = true;
 
-  // WiFi driver is now fully initialized at the stock heap policy; from here on
-  // route the per-AP list allocations to PSRAM (see enableApListPsram()).
+  // Route the per-AP list allocations to PSRAM so a dense dual-band sweep does
+  // not exhaust the internal (DMA) heap. This does not affect the WiFi driver's
+  // own DMA buffers (those are forced internal), so RX is unchanged.
   this->enableApListPsram();
-
-  // Temporary diagnostic (Evil Portal -> scan): report the radio state and the
-  // memory picture AFTER PSRAM routing is decided, so an empty scan after a
-  // portal can be diagnosed off-device. fi=internal free KB, fp=PSRAM free KB,
-  // ps=1 means the AP list is PSRAM-routed (guard bypassed), ps=0 means it fell
-  // back to the internal-heap guard (which pauses adds near 24k).
-  {
-    wifi_mode_t _m = WIFI_MODE_NULL;
-    bool _prom = false;
-    esp_wifi_get_mode(&_m);
-    esp_wifi_get_promiscuous(&_prom);
-    unsigned _fi = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
-    unsigned _fp = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
-    if (_fi > this->dbg_peak_free_kb) this->dbg_peak_free_kb = _fi;
-    Serial.printf("[scan-dbg] init=%d mode=%d prom=%d fi=%uk pk=%uk fp=%uk ps=%d\n",
-                  (int)_init_rc, (int)_m, _prom ? 1 : 0, _fi,
-                  this->dbg_peak_free_kb, _fp, this->list_in_psram ? 1 : 0);
-  }
 
   initTime = millis();
 }
@@ -7050,33 +7004,15 @@ void WiFiScan::RunBeaconScan(uint8_t scan_mode, uint16_t color) {
 
   if (scan_mode != WIFI_SCAN_WAR_DRIVE) {
 
-    esp_err_t _init_rc = esp_wifi_init(&cfg2);
-    // Same recovery as RunAPScan: if a prior Evil Portal softAP left the driver
-    // initialized, esp_wifi_init() errors and the scan receives nothing. A clean
-    // transition returns ESP_OK, so this is inert for the normal case.
-    if (_init_rc != ESP_OK) {
-      esp_wifi_stop();
-      esp_wifi_deinit();
-      delay(50);
-      _init_rc = esp_wifi_init(&cfg2);
-    }
+    // Stock init flow: esp_wifi_init() no-ops if the radio is still up after an
+    // Evil Portal, and setWiFiMode() reconfigures it in place (see RunAPScan).
+    esp_wifi_init(&cfg2);
     #ifdef HAS_IDF_3
       esp_wifi_set_country(&country);
       esp_event_loop_create_default();
     #endif
     this->setWiFiMode(WIFI_MODE_NULL, beaconSnifferCallback);
     this->changeChannel(this->set_channel);
-
-    // Temporary diagnostic (Evil Portal -> scan).
-    {
-      wifi_mode_t _m = WIFI_MODE_NULL;
-      bool _prom = false;
-      esp_wifi_get_mode(&_m);
-      esp_wifi_get_promiscuous(&_prom);
-      unsigned _free = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
-      Serial.printf("[beacon-dbg] init=%d mode=%d prom=%d free=%uk\n",
-                    (int)_init_rc, (int)_m, _prom ? 1 : 0, _free);
-    }
   }
   this->wifi_initialized = true;
   initTime = millis();
