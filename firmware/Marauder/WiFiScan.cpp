@@ -7334,6 +7334,15 @@ void WiFiScan::RunSwiftpairSpam(uint8_t scan_mode, uint16_t color) {
 // Function to start running any BLE scan
 void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
   #ifdef HAS_BT
+    // Release a large leftover AP list before bringing BLE up. Bluetooth scans
+    // (and wardrive, which calls this first) do not use access_points, and on the
+    // shared-radio C5 a big list left from a long AP scan starves NimBLE's init
+    // so it detects nothing. Freeing it here gives the BLE controller room. The
+    // list is rebuilt by the next AP scan; nothing that needs it runs in between.
+    if (access_points && access_points->size() > 0) {
+      delete access_points;
+      access_points = new LinkedList<AccessPoint>();
+    }
     #ifdef HAS_SCREEN
       display_obj.print_delay_1 = 50;
       display_obj.print_delay_2 = 20;
