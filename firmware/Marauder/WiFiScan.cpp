@@ -4526,7 +4526,18 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
   esp_netif_init();
   esp_event_loop_create_default();
 
-  esp_wifi_init(&cfg2);
+  esp_err_t _init_rc = esp_wifi_init(&cfg2);
+  // Recovery: if a prior mode left the driver initialized -- e.g. an Evil Portal
+  // softAP that was not fully torn down -- esp_wifi_init() returns an error and
+  // the scan would silently receive nothing. A clean scan->scan transition
+  // returns ESP_OK here, so this path is inert for the normal case (and never
+  // touches the portal). On error, fully deinit and init again.
+  if (_init_rc != ESP_OK) {
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    delay(50);
+    _init_rc = esp_wifi_init(&cfg2);
+  }
   #ifdef HAS_IDF_3
     esp_wifi_set_country(&country);
     esp_event_loop_create_default();
@@ -4534,6 +4545,23 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
   this->setWiFiMode(WIFI_MODE_NULL, apSnifferCallbackFull);
   this->changeChannel(this->set_channel);
   this->wifi_initialized = true;
+
+  // Temporary diagnostic (Evil Portal -> scan): report what the radio actually
+  // came up as, so an empty scan after a portal can be read off-device.
+  {
+    wifi_mode_t _m = WIFI_MODE_NULL;
+    bool _prom = false;
+    esp_wifi_get_mode(&_m);
+    esp_wifi_get_promiscuous(&_prom);
+    unsigned _free = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+    Serial.printf("[scan-dbg] init=%d mode=%d prom=%d free=%uk\n",
+                  (int)_init_rc, (int)_m, _prom ? 1 : 0, _free);
+    #ifdef HAS_SCREEN
+      display_obj.queueCriticalLine("dbg i=" + String((int)_init_rc) +
+          " m=" + String((int)_m) + " p=" + String(_prom ? 1 : 0) +
+          " free=" + String(_free) + "k");
+    #endif
+  }
 
   // WiFi driver is now fully initialized at the stock heap policy; from here on
   // route the per-AP list allocations to PSRAM (see enableApListPsram()).
@@ -6991,14 +7019,39 @@ void WiFiScan::RunBeaconScan(uint8_t scan_mode, uint16_t color) {
   #endif
 
   if (scan_mode != WIFI_SCAN_WAR_DRIVE) {
-  
-    esp_wifi_init(&cfg2);
+
+    esp_err_t _init_rc = esp_wifi_init(&cfg2);
+    // Same recovery as RunAPScan: if a prior Evil Portal softAP left the driver
+    // initialized, esp_wifi_init() errors and the scan receives nothing. A clean
+    // transition returns ESP_OK, so this is inert for the normal case.
+    if (_init_rc != ESP_OK) {
+      esp_wifi_stop();
+      esp_wifi_deinit();
+      delay(50);
+      _init_rc = esp_wifi_init(&cfg2);
+    }
     #ifdef HAS_IDF_3
       esp_wifi_set_country(&country);
       esp_event_loop_create_default();
     #endif
     this->setWiFiMode(WIFI_MODE_NULL, beaconSnifferCallback);
     this->changeChannel(this->set_channel);
+
+    // Temporary diagnostic (Evil Portal -> scan).
+    {
+      wifi_mode_t _m = WIFI_MODE_NULL;
+      bool _prom = false;
+      esp_wifi_get_mode(&_m);
+      esp_wifi_get_promiscuous(&_prom);
+      unsigned _free = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+      Serial.printf("[beacon-dbg] init=%d mode=%d prom=%d free=%uk\n",
+                    (int)_init_rc, (int)_m, _prom ? 1 : 0, _free);
+      #ifdef HAS_SCREEN
+        display_obj.queueCriticalLine("dbg i=" + String((int)_init_rc) +
+            " m=" + String((int)_m) + " p=" + String(_prom ? 1 : 0) +
+            " free=" + String(_free) + "k");
+      #endif
+    }
   }
   this->wifi_initialized = true;
   initTime = millis();
