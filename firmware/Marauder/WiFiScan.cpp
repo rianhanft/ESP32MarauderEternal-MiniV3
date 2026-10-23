@@ -4527,18 +4527,29 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
     this->prepareScanStage(TFT_GREEN, TFT_BLACK);
   #endif
 
+  // Regenerate the AP list fresh for this scan.
   delete access_points;
   access_points = new LinkedList<AccessPoint>();
+  // Also restart the dual-band channel sweep from the beginning so the first
+  // hops land on 2.4 GHz where most APs live.
+  this->dual_band_channel_index = 0;
+
+  // Start the radio from a guaranteed-clean state. After an Evil Portal the
+  // driver can be left configured such that a plain esp_wifi_init() still
+  // succeeds yet the promiscuous scan receives nothing. Fully stop + deinit
+  // first so any residual mode/filter/netif binding from the portal is cleared
+  // and the scan is rebuilt from scratch -- this is what lets a post-portal
+  // "Scan AP" repopulate. On a normal scan->scan path the driver is already
+  // idle, so these calls simply no-op (their errors are ignored).
+  esp_wifi_stop();
+  esp_wifi_deinit();
+  delay(5);
 
   esp_netif_init();
   esp_event_loop_create_default();
 
   esp_err_t _init_rc = esp_wifi_init(&cfg2);
-  // Recovery: if a prior mode left the driver initialized -- e.g. an Evil Portal
-  // softAP that was not fully torn down -- esp_wifi_init() returns an error and
-  // the scan would silently receive nothing. A clean scan->scan transition
-  // returns ESP_OK here, so this path is inert for the normal case (and never
-  // touches the portal). On error, fully deinit and init again.
+  // If init still reports the driver busy, deinit once more and retry.
   if (_init_rc != ESP_OK) {
     esp_wifi_stop();
     esp_wifi_deinit();
