@@ -6594,6 +6594,14 @@ void WiFiScan::executeWarDrive() {
           for (int i = 0; i < 3; i++)
             broadcastCustomBeacon(millis(), {"Flock", 1, {ap_mac[0], ap_mac[1], ap_mac[2], ap_mac[3], ap_mac[4], ap_mac[5]}, false}, true);
           //broadcastSetSSID(millis(), "Flock", 1, true);
+
+          // The decoy beacon above is transmitted from AP mode on channel 1.
+          // Return to STA scan mode now so the WiFi.scanNetworks() calls below
+          // run real scans again: left in AP mode the driver stopped reporting
+          // networks and wardriving stalled (stuck on ch 1, no new APs).
+          this->shutdownWiFi();
+          this->startWardriverWiFi();
+          this->wifi_initialized = true;
         }
 
         // Only run BLE after the entire weighted WiFi channel list has completed.
@@ -6627,6 +6635,9 @@ void WiFiScan::executeWarDrive() {
 
         uint8_t scan_channel = wardrive_channels[this->wardrive_channel_index];
         this->wardrive_channel_index++;
+        // Track the channel actually being scanned so the UI doesn't appear
+        // frozen on channel 1 (set by the decoy-beacon step above).
+        this->set_channel = scan_channel;
 
         #ifdef HAS_DUAL_BAND
           WiFi.scanNetworks(true, true, false, 80, scan_channel);
