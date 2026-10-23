@@ -322,6 +322,53 @@ void Display::RunSetup() {
   #endif
 }
 
+namespace {
+// Custom MarauderBox emblem: a bold menacing skull in white with blue angled
+// eye sockets, nose and teeth, drawn from primitives so it scales to any
+// screen. `s` is roughly the cranium radius; sc() scales a per-mille of s.
+void drawMarauderSkull(TFT_eSPI& tft, int16_t cx, int16_t cy, int16_t s,
+                       uint16_t white, uint16_t blue) {
+  auto sc = [s](int permille) -> int16_t {
+    return static_cast<int16_t>((static_cast<int32_t>(s) * permille) / 1000);
+  };
+  const int16_t domeCy = cy - sc(350);
+
+  // Tapered face (cheekbones -> chin) as a trapezoid behind the cranium.
+  const int16_t cheekY = domeCy + sc(150);
+  const int16_t chinY  = domeCy + sc(1350);
+  tft.fillTriangle(cx - sc(950), cheekY, cx + sc(950), cheekY, cx + sc(420), chinY, white);
+  tft.fillTriangle(cx - sc(950), cheekY, cx + sc(420), chinY, cx - sc(420), chinY, white);
+  // Cranium + softened jaw base so it reads as one solid skull.
+  tft.fillCircle(cx, domeCy, s, white);
+  tft.fillRoundRect(cx - sc(500), chinY - sc(350), sc(1000), sc(500), sc(180), white);
+
+  // Angled eye sockets (blue): each is a quad = two triangles, slanting
+  // down toward the centre for a menacing look.
+  const int16_t eT = domeCy - sc(330);
+  const int16_t eB = domeCy + sc(300);
+  tft.fillTriangle(cx - sc(740), eT, cx - sc(300), eT + sc(160), cx - sc(340), eB, blue);
+  tft.fillTriangle(cx - sc(740), eT, cx - sc(340), eB, cx - sc(780), eB - sc(140), blue);
+  tft.fillTriangle(cx + sc(740), eT, cx + sc(300), eT + sc(160), cx + sc(340), eB, blue);
+  tft.fillTriangle(cx + sc(740), eT, cx + sc(340), eB, cx + sc(780), eB - sc(140), blue);
+
+  // Nose (blue inverted triangle).
+  const int16_t nT = domeCy + sc(450);
+  tft.fillTriangle(cx, nT + sc(330), cx - sc(150), nT, cx + sc(150), nT, blue);
+
+  // Teeth: a blue row of separators across the bottom-centre of the jaw.
+  const int16_t tw = sc(840);
+  const int16_t tx = cx - tw / 2;
+  const int16_t ty = domeCy + sc(920);
+  const int16_t th = sc(500);
+  tft.drawFastHLine(tx, ty, tw, blue);
+  tft.drawFastVLine(cx, ty, th, blue);
+  tft.drawFastVLine(cx - sc(280), ty, th, blue);
+  tft.drawFastVLine(cx + sc(280), ty, th, blue);
+  tft.drawFastVLine(cx - sc(560), ty, th, blue);
+  tft.drawFastVLine(cx + sc(560), ty, th, blue);
+}
+}  // namespace
+
 void Display::drawBootSplash() {
   const int16_t width = tft.width();
   const int16_t height = tft.height();
@@ -351,51 +398,37 @@ void Display::drawBootSplash() {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawCentreString("esp32 MarauderBox", width / 2, layout.title_y, 1);
 
-  const uint32_t source_x_step = layout.logo_width > 1
-      ? (static_cast<uint32_t>(JCMK_LOGO_WIDTH - 1) << 8) /
-            (layout.logo_width - 1)
-      : 0;
-  const uint32_t source_y_step = layout.logo_height > 1
-      ? (static_cast<uint32_t>(JCMK_LOGO_HEIGHT - 1) << 8) /
-            (layout.logo_height - 1)
-      : 0;
-  for (int16_t y = 0; y < layout.logo_height; ++y) {
-    int16_t run_start = -1;
-    for (int16_t x = 0; x <= layout.logo_width; ++x) {
-      const bool white = x < layout.logo_width &&
-          cleanLogoPixel(x, y, layout.logo_width, layout.logo_height,
-                         source_x_step, source_y_step);
-      if (white && run_start < 0) run_start = x;
-      if (!white && run_start >= 0) {
-        tft.drawFastHLine(layout.logo_x + run_start, layout.logo_y + y,
-                          x - run_start, TFT_WHITE);
-        run_start = -1;
-      }
-    }
+  // "MarauderBox" frame around the emblem (rounded double border, theme blue).
+  const int16_t pad = 7;
+  int16_t bx = layout.logo_x - pad;
+  int16_t by = layout.logo_y - pad;
+  int16_t bw = layout.logo_width + pad * 2;
+  int16_t bh = layout.logo_height + pad * 2;
+  // Keep the frame on-screen even if the logo area sits near an edge.
+  if (bx < 1) { bw += bx - 1; bx = 1; }
+  if (by < 1) { bh += by - 1; by = 1; }
+  if (bx + bw > width - 1) bw = width - 1 - bx;
+  if (by + bh > height - 1) bh = height - 1 - by;
+
+  // Custom white + blue skull emblem, centred and scaled to fit the box.
+  {
+    const int16_t cx = bx + bw / 2;
+    const int16_t cy = by + bh / 2;
+    const int16_t fit_w = (bw - 16) / 2;
+    const int16_t fit_h = ((bh - 16) * 2) / 5;
+    int16_t s = fit_w < fit_h ? fit_w : fit_h;
+    if (s < 6) s = 6;
+    drawMarauderSkull(tft, cx, cy, s, TFT_WHITE, TFT_CYAN);
   }
 
-  // "MarauderBox" frame: a rounded double border around the logo, in the theme
-  // accent, so the boot screen reads as the logo boxed up.
-  {
-    const int16_t pad = 7;
-    int16_t bx = layout.logo_x - pad;
-    int16_t by = layout.logo_y - pad;
-    int16_t bw = layout.logo_width + pad * 2;
-    int16_t bh = layout.logo_height + pad * 2;
-    // Keep the frame on-screen even if the logo sits near an edge.
-    if (bx < 1) { bw += bx - 1; bx = 1; }
-    if (by < 1) { bh += by - 1; by = 1; }
-    if (bx + bw > width - 1) bw = width - 1 - bx;
-    if (by + bh > height - 1) bh = height - 1 - by;
-    const int16_t radius = 6;
-    tft.drawRoundRect(bx, by, bw, bh, radius, TFT_CYAN);
-    tft.drawRoundRect(bx + 2, by + 2, bw - 4, bh - 4,
-                      radius > 1 ? radius - 1 : 1, TFT_CYAN);
-  }
+  const int16_t radius = 6;
+  tft.drawRoundRect(bx, by, bw, bh, radius, TFT_CYAN);
+  tft.drawRoundRect(bx + 2, by + 2, bw - 4, bh - 4,
+                    radius > 1 ? radius - 1 : 1, TFT_CYAN);
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawCentreString("1.1.1", width / 2, layout.version_y, 1);
-  tft.setTextColor(TFT_GREEN, TFT_BLACK);
+  tft.setTextColor(TFT_CYAN, TFT_BLACK);
   tft.drawCentreString("Initializing...", width / 2, layout.status_y, 1);
   tft.setTextSize(1);
 }
