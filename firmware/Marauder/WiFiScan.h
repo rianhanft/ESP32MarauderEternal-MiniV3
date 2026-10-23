@@ -624,6 +624,14 @@ class WiFiScan
     // Track for AP list limit (Uninitialised, Done in RunSetup)
     bool ap_list_full_reported;
 
+    // True while the active scan stores its AP list in PSRAM (set by
+    // applyScanHeapPolicy for AP-list scans). The AP-add path then gates on
+    // PSRAM free instead of the internal-heap memory guard.
+    bool list_in_psram = false;
+    // Upper bound on the AP list when it lives in PSRAM, to keep the UI and
+    // attack loops that iterate it responsive. PSRAM itself holds far more.
+    static const int AP_LIST_PSRAM_CAP = 300;
+
     // MULTI SSID STRUCTS
 
     struct MultiSSIDTracker {
@@ -882,6 +890,12 @@ class WiFiScan
     // Emit a one-shot on-screen + serial notice when the memory guard refuses
     // to add another AccessPoint during a scan (ap_list_full_reported gates it).
     void noteApListStalled();
+    // Reset the heap policy to stock at every mode change (called from
+    // StartScan, main task), so Wi-Fi/softAP/httpd init is never diverted to
+    // PSRAM. AP-list scans re-enable PSRAM list routing via enableApListPsram()
+    // AFTER their Wi-Fi init completes.
+    void applyScanHeapPolicy(uint8_t scan_mode);
+    void enableApListPsram();
     void writeHeader(bool poi = false);
     void writeFooter(bool poi = false);
     void displayWardriveStats();
