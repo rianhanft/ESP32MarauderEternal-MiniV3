@@ -4546,26 +4546,32 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
   this->changeChannel(this->set_channel);
   this->wifi_initialized = true;
 
-  // Temporary diagnostic (Evil Portal -> scan): report what the radio actually
-  // came up as, so an empty scan after a portal can be read off-device.
+  // WiFi driver is now fully initialized at the stock heap policy; from here on
+  // route the per-AP list allocations to PSRAM (see enableApListPsram()).
+  this->enableApListPsram();
+
+  // Temporary diagnostic (Evil Portal -> scan): report the radio state and the
+  // memory picture AFTER PSRAM routing is decided, so an empty scan after a
+  // portal can be diagnosed off-device. fi=internal free KB, fp=PSRAM free KB,
+  // ps=1 means the AP list is PSRAM-routed (guard bypassed), ps=0 means it fell
+  // back to the internal-heap guard (which pauses adds near 24k).
   {
     wifi_mode_t _m = WIFI_MODE_NULL;
     bool _prom = false;
     esp_wifi_get_mode(&_m);
     esp_wifi_get_promiscuous(&_prom);
-    unsigned _free = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
-    Serial.printf("[scan-dbg] init=%d mode=%d prom=%d free=%uk\n",
-                  (int)_init_rc, (int)_m, _prom ? 1 : 0, _free);
+    unsigned _fi = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+    unsigned _fp = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
+    Serial.printf("[scan-dbg] init=%d mode=%d prom=%d fi=%uk fp=%uk ps=%d\n",
+                  (int)_init_rc, (int)_m, _prom ? 1 : 0, _fi, _fp,
+                  this->list_in_psram ? 1 : 0);
     #ifdef HAS_SCREEN
       display_obj.queueCriticalLine("dbg i=" + String((int)_init_rc) +
           " m=" + String((int)_m) + " p=" + String(_prom ? 1 : 0) +
-          " free=" + String(_free) + "k");
+          " fi=" + String(_fi) + "k fp=" + String(_fp) + "k ps=" +
+          String(this->list_in_psram ? 1 : 0));
     #endif
   }
-
-  // WiFi driver is now fully initialized at the stock heap policy; from here on
-  // route the per-AP list allocations to PSRAM (see enableApListPsram()).
-  this->enableApListPsram();
 
   initTime = millis();
 }
