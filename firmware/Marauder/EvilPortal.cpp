@@ -153,15 +153,21 @@ void EvilPortal::cleanup() {
   this->ap_index = -1;
 
   if (portal_was_running) {
+    // Stop the HTTP server first (while the AP netif / lwIP are still up) so its
+    // listening socket closes cleanly, then the DNS server.
     this->dnsServer.stop();
     if (evil_portal_httpd != nullptr) {
       httpd_stop(evil_portal_httpd);
       evil_portal_httpd = nullptr;
     }
-    // NOTE: AP/radio teardown is intentionally left to WiFiScan::shutdownWiFi(),
-    // which runs right after this. WiFi.softAPdisconnect() here calls AP.begin()
-    // internally and left the softAP unjoinable on the next portal, so it is
-    // deliberately NOT called from cleanup().
+    // Tear down the softAP through Arduino, exactly as stock Marauder's Evil
+    // Portal does. This releases the AP netif + DHCP pool and cleanly deinits
+    // the radio, which is what lets the NEXT scan receive again -- without it
+    // the softAP lingered and promiscuous RX stayed dead ("Scan AP shows
+    // nothing after an Evil Portal"). Stock pairs this same call with the
+    // esp_wifi_init(&cfg) in RunEvilPortal, so the next portal re-creates the AP
+    // normally.
+    WiFi.softAPdisconnect(true);
   }
 
   free(index_html);
