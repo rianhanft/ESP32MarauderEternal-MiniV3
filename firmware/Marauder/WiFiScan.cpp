@@ -4474,14 +4474,13 @@ void WiFiScan::RunEvilPortal(uint8_t scan_mode, uint16_t color) {
     this->prepareScanStage(TFT_MAGENTA, TFT_BLACK);
   #endif
 
-  // Stock init: bring up the driver here, exactly as the reference firmware
-  // does, then let evil_portal_obj.begin() -> startAP() configure the softAP.
-  // Keeping this identical to stock is what lets the next scan reconfigure the
-  // (still-initialized) radio in place and repopulate after a portal.
-  #ifdef HAS_IDF_3
-    esp_wifi_init(&cfg);
-  #endif
-
+  // Do NOT pre-init the driver with esp_wifi_init(&cfg) here. evil_portal_obj
+  // .begin() -> startAP() brings the softAP up through Arduino (WiFi.softAP()).
+  // If we pre-init, Arduino's own init is skipped and its _esp_wifi_started flag
+  // never gets set -- which makes WiFi.softAPdisconnect(true) in cleanup() return
+  // early WITHOUT deiniting the radio, so the softAP lingers and the next scan
+  // receives nothing. Letting Arduino own the whole softAP lifecycle is what lets
+  // cleanup() tear the radio fully down so scans work again afterward.
   evil_portal_obj.begin(ssids, access_points);
   this->wifi_initialized = true;
   initTime = millis();
