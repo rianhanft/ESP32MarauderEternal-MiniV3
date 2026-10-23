@@ -2004,6 +2004,21 @@ void WiFiScan::RunSetup() {
   // for AP scan low-memory reporting (was declared but never initialized)
   ap_list_full_reported = false;
 
+  // Trim the Wi-Fi driver's internal (DMA) buffer pool on the C5/IDF5 boards.
+  // The IDF default (static_rx 10 / dynamic_rx 32 / dynamic_tx 32) reserves a
+  // large amount of internal DMA heap, which this heavy build can't spare: a
+  // dense dual-band scan grows the dynamic RX pool until free internal heap is
+  // too low to start the next scan or bring up the Evil Portal softAP (the
+  // "scan fails after a portal" / "can't join after a big scan" failures).
+  // A scanner and a low-traffic captive portal don't need the full pool; smaller
+  // bounded counts leave headroom across the Wi-Fi mode transitions. cfg drives
+  // Evil Portal (esp_wifi_init(&cfg)); cfg2 drives the scans (esp_wifi_init(&cfg2)).
+  #ifdef HAS_IDF_3
+    cfg.static_rx_buf_num   = 8;   cfg2.static_rx_buf_num   = 8;
+    cfg.dynamic_rx_buf_num  = 16;  cfg2.dynamic_rx_buf_num  = 16;
+    cfg.dynamic_tx_buf_num  = 16;  cfg2.dynamic_tx_buf_num  = 16;
+  #endif
+
   settings_obj.loadSetting<bool>("ChanHop");
 
   File api_settings_file;

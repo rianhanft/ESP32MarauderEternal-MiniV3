@@ -158,13 +158,10 @@ void EvilPortal::cleanup() {
       httpd_stop(evil_portal_httpd);
       evil_portal_httpd = nullptr;
     }
-    // Explicitly tear down the SoftAP netif + DHCP lease pool. Without this the
-    // AP netif leaked internal (DMA) heap every portal, so after one Evil Portal
-    // session free internal heap sat ~20 KB -- too low for the next AP scan to
-    // start or for a fresh softAP, which is the "scan fails after a portal" /
-    // "phone can't connect after a big scan" failure. Guarded by portal_was_running
-    // so it only runs when WE actually started the AP (not on unrelated scans).
-    WiFi.softAPdisconnect(true);
+    // NOTE: AP/radio teardown is intentionally left to WiFiScan::shutdownWiFi(),
+    // which runs right after this. WiFi.softAPdisconnect() here calls AP.begin()
+    // internally and left the softAP unjoinable on the next portal, so it is
+    // deliberately NOT called from cleanup().
   }
 
   free(index_html);
