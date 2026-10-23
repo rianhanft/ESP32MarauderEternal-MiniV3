@@ -396,8 +396,8 @@ void Display::drawBootSplash() {
   // Blue cat-in-a-box emblem, scaled to fit inside the box while preserving its
   // aspect ratio, and centred.
   {
-    const int16_t avail_w = bw - 10;
-    const int16_t avail_h = bh - 10;
+    const int16_t avail_w = bw - 14;
+    const int16_t avail_h = bh - 14;
     int16_t dw = avail_w;
     int16_t dh = static_cast<int16_t>(
         (static_cast<int32_t>(dw) * CAT_LOGO_HEIGHT) / CAT_LOGO_WIDTH);
