@@ -591,16 +591,6 @@ void MenuFunctions::main(uint32_t currentTime)
           (wifi_scan_obj.currentScanMode == WIFI_SCAN_CSI_MOTION) ||
           (wifi_scan_obj.currentScanMode == BT_SCAN_ANALYZER))
       {
-        // Evil Portal's AP/SSID picker builds one menu node per scanned AP on
-        // the internal (DMA) heap; those nodes outlive the portal and, after a
-        // long scan, leave too little internal heap for the next scan's
-        // esp_wifi_init ("scan fails after a captive portal") and for the softAP
-        // to accept a client ("phone can't join with a big AP list"). Free them
-        // on exit -- they are rebuilt next time the Evil Portal menu opens.
-        if (wifi_scan_obj.currentScanMode == WIFI_SCAN_EVIL_PORTAL) {
-          wifiAPMenu.list->clear();
-          ssidsMenu.list->clear();
-        }
         wifi_scan_obj.StartScan(WIFI_SCAN_OFF);
 
         // If we don't do this, the text and button coordinates will be off
@@ -723,13 +713,6 @@ void MenuFunctions::main(uint32_t currentTime)
             (wifi_scan_obj.currentScanMode == WIFI_SCAN_CSI_MOTION) ||
             (wifi_scan_obj.currentScanMode == BT_SCAN_ANALYZER))
         {
-          // See the note in the other exit path: free the Evil Portal picker
-          // menus so their per-AP internal-heap nodes don't starve the next
-          // scan / softAP after a long scan.
-          if (wifi_scan_obj.currentScanMode == WIFI_SCAN_EVIL_PORTAL) {
-            wifiAPMenu.list->clear();
-            ssidsMenu.list->clear();
-          }
           wifi_scan_obj.StartScan(WIFI_SCAN_OFF);
 
           // Restore display state without full reinit to avoid screen flash
