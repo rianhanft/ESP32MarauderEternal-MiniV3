@@ -7369,7 +7369,15 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
     }
 
 
-    NimBLEDevice::init("");
+    // After an Evil Portal the WiFi side of the shared radio has been used
+    // heavily, and NimBLE's controller init can come up unusable -> wardrive then
+    // detects no Bluetooth. If init reports failure, fully deinit and try once
+    // more from a clean state. This only touches the BLE path, not WiFi/portal.
+    if (!NimBLEDevice::init("")) {
+      NimBLEDevice::deinit(true);
+      delay(100);
+      NimBLEDevice::init("");
+    }
     pBLEScan = NimBLEDevice::getScan(); //create new scan
     if ((scan_mode == BT_SCAN_ALL) ||
         (scan_mode == BT_SCAN_IBEACON) ||
