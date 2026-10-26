@@ -12,6 +12,7 @@
 
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include <esp_heap_caps.h>
 
 #include "Display.h"
 #include "Switches.h"
@@ -161,16 +162,35 @@ constexpr CameraOui CAMERA_OUIS[] = {
   {0x2C8D48, CameraVendor::Eufy}
 };
 
-Detection results[MAX_RESULTS]{};
-// UI rendering and target selection are synchronous on the Arduino loop task.
-// Reuse one static snapshot so nested draw calls do not place two 3.2 KB
-// Detection arrays on the comparatively small loop-task stack.
-Detection uiSnapshot[MAX_RESULTS]{};
+// Allocated in PSRAM on first use (see ensureBuffers()) instead of internal
+// .bss, so this feature does not permanently hold the scarce internal SRAM that
+// esp_wifi_init() needs after a Bluetooth session. UI rendering and target
+// selection are synchronous on the Arduino loop task; reuse one snapshot so
+// nested draw calls do not place two Detection arrays on the loop-task stack.
+Detection* results = nullptr;
+Detection* uiSnapshot = nullptr;
 uint8_t resultCount = 0;
 uint8_t eufyNetworks[MAX_EUFY_NETWORKS][6]{};
 uint8_t eufyNetworkCount = 0;
 volatile uint32_t resultRevision = 0;
 volatile uint8_t scanChannel = 1;
+
+// Allocate the result/snapshot stores in PSRAM on first use (idempotent).
+// Detection is a POD zeroed on reset/insert, so zero-init is correct. Must be
+// called before any access and outside any portENTER_CRITICAL section.
+bool ensureBuffers() {
+  if (results && uiSnapshot) return true;
+  auto alloc = []() -> Detection* {
+    void* mem = heap_caps_malloc(sizeof(Detection) * MAX_RESULTS, MALLOC_CAP_SPIRAM);
+    if (!mem) mem = heap_caps_malloc(sizeof(Detection) * MAX_RESULTS, MALLOC_CAP_8BIT);
+    if (!mem) return nullptr;
+    memset(mem, 0, sizeof(Detection) * MAX_RESULTS);
+    return static_cast<Detection*>(mem);
+  };
+  if (!results) results = alloc();
+  if (!uiSnapshot) uiSnapshot = alloc();
+  return results && uiSnapshot;
+}
 portMUX_TYPE resultMux = portMUX_INITIALIZER_UNLOCKED;
 
 const char* vendorName(CameraVendor vendor) {
@@ -255,6 +275,7 @@ void updateResult(const uint8_t* address, CameraVendor vendor,
                   const char* ssid, const char* evidence, int8_t rssi,
                   uint8_t channel, uint8_t confidence,
                   const uint8_t* bssid = nullptr) {
+  if (!results) return;  // run() allocates the store before scanning starts
   char formattedAddress[18]{};
   formatAddress(address, formattedAddress, sizeof(formattedAddress));
 
@@ -481,6 +502,7 @@ void promiscuousCallback(void* buffer, wifi_promiscuous_pkt_type_t type) {
 }
 
 uint8_t copyResults(Detection* output) {
+  if (!results || !output) return 0;
   portENTER_CRITICAL(&resultMux);
   const uint8_t count = resultCount;
   memcpy(output, results, sizeof(Detection) * count);
@@ -489,8 +511,9 @@ uint8_t copyResults(Detection* output) {
 }
 
 void resetResults() {
+  if (!ensureBuffers()) return;
   portENTER_CRITICAL(&resultMux);
-  memset(results, 0, sizeof(results));
+  memset(results, 0, sizeof(Detection) * MAX_RESULTS);
   resultCount = 0;
   memset(eufyNetworks, 0, sizeof(eufyNetworks));
   eufyNetworkCount = 0;
@@ -843,6 +866,7 @@ void drawDeauthPreflight(const DeauthTarget& plan, uint8_t selected) {
 }  // namespace
 
 void run() {
+  if (!ensureBuffers()) { showError("Out of memory for Camera Detector."); return; }
   releaseControls();
   resetResults();
   const esp_err_t error = startPassiveScan();
@@ -920,6 +944,7 @@ void run() {
 
 bool selectDeauthTarget(DeauthTarget& target) {
   memset(&target, 0, sizeof(target));
+  if (!ensureBuffers()) { showError("Out of memory for Camera Detector."); return false; }
   releaseControls();
   resetResults();
   const esp_err_t error = startPassiveScan();

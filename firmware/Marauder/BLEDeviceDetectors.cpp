@@ -10,6 +10,8 @@
       || defined(HAS_TOUCH) )
 
 #include <NimBLEDevice.h>
+#include <esp_heap_caps.h>
+#include <new>
 
 #include "Display.h"
 #include "Switches.h"
@@ -44,10 +46,13 @@ struct Detection {
   uint32_t advertisements = 0;
 };
 
-Detection results[MAX_RESULTS]{};
+// Allocated in PSRAM on first use (see ensureBuffers()) instead of internal
+// .bss, so this feature does not permanently hold the scarce internal SRAM that
+// esp_wifi_init() needs after a Bluetooth session.
+Detection* results = nullptr;
 uint8_t resultCount = 0;
-Detection uiSnapshot[MAX_RESULTS]{};
-marauder::IBeaconObservation beaconCache[MAX_RESULTS];
+Detection* uiSnapshot = nullptr;
+marauder::IBeaconObservation* beaconCache = nullptr;
 unsigned beaconCount = 0;
 uint32_t lastBeaconReport = 0;
 bool hasBeaconReport = false;
@@ -56,6 +61,38 @@ bool previewBeaconValid = false;
 volatile uint32_t resultRevision = 0;
 portMUX_TYPE resultMux = portMUX_INITIALIZER_UNLOCKED;
 DetectorType activeDetector = DetectorType::Meshtastic;
+
+// Allocate the result/snapshot/beacon stores in PSRAM on first use (idempotent).
+// All three types are trivially zero-initialisable, but placement-new keeps it
+// correct regardless. Must be called before any access and outside any
+// portENTER_CRITICAL section (it allocates).
+bool ensureBuffers() {
+  if (results && uiSnapshot && beaconCache) return true;
+  auto alloc = [](size_t elemSize) -> void* {
+    void* mem = heap_caps_malloc(elemSize * MAX_RESULTS, MALLOC_CAP_SPIRAM);
+    if (!mem) mem = heap_caps_malloc(elemSize * MAX_RESULTS, MALLOC_CAP_8BIT);
+    return mem;
+  };
+  if (!results) {
+    if (void* m = alloc(sizeof(Detection))) {
+      results = static_cast<Detection*>(m);
+      for (unsigned i = 0; i < MAX_RESULTS; ++i) new (&results[i]) Detection();
+    }
+  }
+  if (!uiSnapshot) {
+    if (void* m = alloc(sizeof(Detection))) {
+      uiSnapshot = static_cast<Detection*>(m);
+      for (unsigned i = 0; i < MAX_RESULTS; ++i) new (&uiSnapshot[i]) Detection();
+    }
+  }
+  if (!beaconCache) {
+    if (void* m = alloc(sizeof(marauder::IBeaconObservation))) {
+      beaconCache = static_cast<marauder::IBeaconObservation*>(m);
+      for (unsigned i = 0; i < MAX_RESULTS; ++i) new (&beaconCache[i]) marauder::IBeaconObservation();
+    }
+  }
+  return results && uiSnapshot && beaconCache;
+}
 
 const char* detectorTitle(DetectorType detector) {
   switch (detector) {
@@ -254,6 +291,7 @@ class DetectorCallbacks : public NimBLEScanCallbacks {
 DetectorCallbacks detectorCallbacks;
 
 uint8_t copyResults(Detection* output) {
+  if (!results || !output) return 0;
   portENTER_CRITICAL(&resultMux);
   const uint8_t count = resultCount;
   memcpy(output, results, sizeof(Detection) * count);
@@ -262,10 +300,11 @@ uint8_t copyResults(Detection* output) {
 }
 
 void resetResults() {
+  if (!ensureBuffers()) return;
   portENTER_CRITICAL(&resultMux);
-  for (auto& result : results) result = Detection();
+  for (unsigned i = 0; i < MAX_RESULTS; ++i) results[i] = Detection();
   if (activeDetector == DetectorType::IBeacon) {
-    for (auto& record : beaconCache) record = marauder::IBeaconObservation();
+    for (unsigned i = 0; i < MAX_RESULTS; ++i) beaconCache[i] = marauder::IBeaconObservation();
     beaconCount = 0; hasBeaconReport = false;
   }
   resultCount = 0;
@@ -384,6 +423,7 @@ void showError(const char* message) {
 }  // namespace
 
 void run(DetectorType detector, uint32_t durationMs) {
+  if (!ensureBuffers()) { showError("Out of memory for BLE detector."); return; }
   if (!durationMs) releaseControls();
   activeDetector = detector;
   resetResults();
@@ -474,6 +514,7 @@ void run(DetectorType detector, uint32_t durationMs) {
 bool observeIBeaconAdvertisement(const uint8_t* data, size_t length, const char* address, int8_t rssi, uint32_t now) {
   marauder::IBeaconPayload beacon;
   if (!marauder::parseIBeacon(data, length, beacon)) return false;
+  if (!ensureBuffers()) return false;  // allocates beaconCache on first use
   portENTER_CRITICAL(&resultMux);
   marauder::retainIBeacon(beaconCache, beaconCount, MAX_RESULTS, beacon, address, rssi, now);
   portEXIT_CRITICAL(&resultMux); return true;
@@ -486,7 +527,7 @@ unsigned iBeaconCount() {
 bool snapshotIBeacon(unsigned index, marauder::IBeaconObservation& out) {
   out = marauder::IBeaconObservation();
   portENTER_CRITICAL(&resultMux);
-  const bool valid = index < beaconCount;
+  const bool valid = beaconCache && index < beaconCount;
   if (valid) out = beaconCache[index];
   portEXIT_CRITICAL(&resultMux); return valid;
 }

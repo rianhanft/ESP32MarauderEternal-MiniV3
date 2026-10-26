@@ -18,6 +18,7 @@
 
 #include <NimBLEDevice.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
 #include <esp_wifi.h>
 
 #include "Display.h"
@@ -55,12 +56,28 @@ struct Device {
   DeviceKind kind;
 };
 
-Device results[MAX_RESULTS]{};
+// Allocated in PSRAM on first use (see ensureBuffers()) instead of internal
+// .bss, so this feature does not permanently hold the scarce internal SRAM that
+// esp_wifi_init() needs after a Bluetooth session.
+Device* results = nullptr;
 uint8_t resultCount = 0;
 volatile uint32_t resultRevision = 0;
 volatile uint32_t persistenceWindow = 1;
 volatile uint8_t scanChannel = 1;
 portMUX_TYPE resultMux = portMUX_INITIALIZER_UNLOCKED;
+
+// Allocate the result store in PSRAM on first use (idempotent). Device is a POD
+// zeroed on insert, so a plain zero-init is correct. Must be called before any
+// access and outside any portENTER_CRITICAL section (it allocates).
+bool ensureBuffers() {
+  if (results) return true;
+  void* mem = heap_caps_malloc(sizeof(Device) * MAX_RESULTS, MALLOC_CAP_SPIRAM);
+  if (!mem) mem = heap_caps_malloc(sizeof(Device) * MAX_RESULTS, MALLOC_CAP_8BIT);
+  if (!mem) return false;
+  memset(mem, 0, sizeof(Device) * MAX_RESULTS);
+  results = static_cast<Device*>(mem);
+  return true;
+}
 
 bool buttonDown(Switches& button) {
   return button.isDown();
@@ -92,6 +109,7 @@ void updateDevice(DeviceKind kind, const uint8_t* address, const char* name,
                   int8_t rssi, uint8_t channel) {
   if (!address || (kind == WIFI_DEVICE && (address[0] & 0x01)))
     return;
+  if (!results) return;  // run() allocates the store before scanning starts
   char formatted[18]{};
   formatAddress(address, formatted, sizeof(formatted));
   const uint32_t now = millis();
@@ -204,6 +222,7 @@ bool ranksBefore(const Device& left, const Device& right) {
 }
 
 uint8_t copyResults(Device* output) {
+  if (!results || !output) return 0;
   portENTER_CRITICAL(&resultMux);
   const uint8_t count = resultCount;
   memcpy(output, results, sizeof(Device) * count);
@@ -221,8 +240,9 @@ uint8_t copyResults(Device* output) {
 }
 
 void resetResults() {
+  if (!ensureBuffers()) return;
   portENTER_CRITICAL(&resultMux);
-  memset(results, 0, sizeof(results));
+  memset(results, 0, sizeof(Device) * MAX_RESULTS);
   resultCount = 0;
   resultRevision++;
   persistenceWindow = 1;
@@ -326,6 +346,7 @@ void showError(const char* message) {
 }  // namespace
 
 void run() {
+  if (!ensureBuffers()) { showError("Out of memory for Device Scout."); return; }
   releaseControls();
   resetResults();
   if (NimBLEDevice::isInitialized())

@@ -26,6 +26,8 @@
 #include <NimBLEDevice.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include <esp_heap_caps.h>
+#include <new>
 
 #include "Display.h"
 #include "Switches.h"
@@ -72,10 +74,14 @@ enum Method : uint8_t {
 };
 
 using Drone = drone_tracking::Record;
-Drone results[MAX_RESULTS]{};
-// Foreground-only snapshot: do not put the enlarged 16-record store on the
-// Arduino loop stack, and do not allocate/free it at each screen refresh.
-Drone uiSnapshot[MAX_RESULTS]{};
+// These two stores are the largest buffers this feature owns (~9.5KB each).
+// They are allocated in PSRAM on first use instead of living in internal .bss,
+// so compiling this feature in does not permanently consume the scarce internal
+// (DMA-capable) SRAM that esp_wifi_init() needs after a Bluetooth session. See
+// ensureResultBuffers(). Foreground-only snapshot: do not put the enlarged
+// 16-record store on the loop stack, nor allocate/free it at each refresh.
+Drone* results = nullptr;
+Drone* uiSnapshot = nullptr;
 unsigned resultCount = 0;
 uint32_t nextGeneration = 0;
 drone_tracking::Export exportLog;
@@ -89,6 +95,26 @@ portMUX_TYPE resultMux = portMUX_INITIALIZER_UNLOCKED;
 
 const uint8_t NAN_DESTINATION[] = {0x51, 0x6F, 0x9A, 0x01, 0x00, 0x00};
 const uint8_t NAN_SERVICE_ID[] = {0x88, 0x69, 0x19, 0x9D, 0x92, 0x09};
+
+// Allocate the result stores in PSRAM on first use (idempotent). Prefers PSRAM;
+// falls back to internal RAM only if PSRAM is unavailable. Record has non-zero
+// default members (unknown altitude/speed sentinels), so each element is
+// placement-constructed rather than zeroed. Must be called before any access
+// and outside any portENTER_CRITICAL section (it allocates).
+bool ensureResultBuffers() {
+  if (results && uiSnapshot) return true;
+  auto allocStore = []() -> Drone* {
+    void* mem = heap_caps_malloc(sizeof(Drone) * MAX_RESULTS, MALLOC_CAP_SPIRAM);
+    if (!mem) mem = heap_caps_malloc(sizeof(Drone) * MAX_RESULTS, MALLOC_CAP_8BIT);
+    if (!mem) return nullptr;
+    Drone* store = static_cast<Drone*>(mem);
+    for (unsigned i = 0; i < MAX_RESULTS; ++i) new (&store[i]) Drone();
+    return store;
+  };
+  if (!results) results = allocStore();
+  if (!uiSnapshot) uiSnapshot = allocStore();
+  return results && uiSnapshot;
+}
 
 bool buttonDown(Switches& button) {
   return button.isDown();
@@ -111,8 +137,9 @@ void releaseControls() {
 }
 
 void resetResults() {
+  if (!ensureResultBuffers()) return;
   portENTER_CRITICAL(&resultMux);
-  for (auto& result : results) result = Drone();
+  for (unsigned i = 0; i < MAX_RESULTS; ++i) results[i] = Drone();
   resultCount = 0;
   resultRevision++;
   portEXIT_CRITICAL(&resultMux);
@@ -263,6 +290,7 @@ class RemoteIdCallbacks : public NimBLEScanCallbacks {
 RemoteIdCallbacks remoteIdCallbacks;
 
 uint8_t copyResults(Drone* output) {
+  if (!results || !output) return 0;
   portENTER_CRITICAL(&resultMux);
   const uint8_t count = resultCount;
   memcpy(output, results, sizeof(Drone) * count);
@@ -503,6 +531,7 @@ void showError(const char* message) {
 
 bool selectCapturedForSpoof(CapturedDrone& target) {
   releaseControls();
+  if (!ensureResultBuffers()) { showError("No captured drones. Run Drone Remote ID first."); return false; }
   Drone* snapshot = uiSnapshot;
   const uint8_t count = copyResults(snapshot);
   if (count == 0) {
@@ -585,6 +614,7 @@ bool selectCapturedForSpoof(CapturedDrone& target) {
 }
 
 void run(uint32_t durationMs) {
+  if (!ensureResultBuffers()) { showError("Out of memory for Drone Remote ID."); return; }
   if (!durationMs) releaseControls();
   resetResults();
   lastExportOk = false;
