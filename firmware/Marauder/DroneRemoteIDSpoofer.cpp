@@ -359,6 +359,23 @@ void run() {
   display_obj.tft.setTextDatum(TL_DATUM);
   display_obj.tft.setTextWrap(false);
   display_obj.tft.setTextSize(1);
+
+  // The spoofer drives WiFi and Bluetooth coexistence together, which leaves the
+  // C5's shared RF in a state that a software re-init does not recover: the next
+  // Bluetooth scan comes up clean (NimBLE ok, controller enabled, RAM free) yet
+  // receives nothing. A reboot restores the radio to its known-good power-on
+  // state, and the spoof is a terminal action, so a brief reset here is the
+  // reliable way to keep Bluetooth (and WiFi) working afterward.
+  #ifdef HAS_SCREEN
+    display_obj.tft.fillScreen(TFT_BLACK);
+    display_obj.tft.setTextDatum(MC_DATUM);
+    display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    display_obj.tft.drawString("Spoof complete", TFT_WIDTH / 2, (TFT_HEIGHT / 2) - 10, 2);
+    display_obj.tft.drawString("Resetting radio...", TFT_WIDTH / 2, (TFT_HEIGHT / 2) + 10, 2);
+    display_obj.tft.setTextDatum(TL_DATUM);
+  #endif
+  delay(1500);
+  ESP.restart();
 }
 
 }  // namespace DroneRemoteIDSpoofer
