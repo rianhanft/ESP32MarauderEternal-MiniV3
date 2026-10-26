@@ -6570,8 +6570,16 @@ void WiFiScan::executeWarDrive() {
 
         WiFi.scanDelete();
 
-        // Detect some probes for a little bit
-        if ((this->wardrive_channel_index + 1) % 4 == 0) {
+        // Decoy-beacon step: a full WiFi teardown + AP-mode re-init. It is
+        // memory-heavy, and repeating it every few channels fragments the
+        // internal DMA heap over a long wardrive until WiFi.scanNetworks() can
+        // no longer allocate and returns WIFI_SCAN_FAILED -- the scan then
+        // "times out" and the channel index races through the list with no
+        // results. Skip it unless there is a healthy contiguous DMA block for a
+        // clean AP-mode init, so the core wardrive scan keeps working under
+        // memory pressure. Runs normally when memory is healthy.
+        if (((this->wardrive_channel_index + 1) % 4 == 0) &&
+            (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) >= (48 * 1024))) {
           this->wifi_initialized = true;
           this->shutdownWiFi();
           esp_err_t init_err = esp_wifi_init(&cfg2);
