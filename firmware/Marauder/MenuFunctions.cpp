@@ -3761,6 +3761,68 @@ void MenuFunctions::buildWiFiGeneralMenu()
       this->changeMenu(&wifiAPMenu, true);
     });
 
+    // Select every AP that shares an SSID -- handy for mesh / enterprise / range
+    // extended networks that broadcast one SSID from many BSSIDs and channels.
+    // Rewritten to scan access_points only ONCE: the earlier version did nested
+    // access_points->get() lookups (O(n^3), with an AccessPoint/String copy per
+    // access) and froze the device on dense scans. Here one pass accumulates the
+    // unique SSIDs + counts into small side-lists, and the menu is built from
+    // those -- the access_points cost is the same as the "Select APs" list.
+    this->addNodes(&wifiGeneralMenu, "Select by SSID", TFTNAVY, KEYBOARD_ICO, [this](){
+      wifiAPMenu.parentMenu = &wifiGeneralMenu;
+      wifiAPMenu.list->clear();
+      this->addNodes(&wifiAPMenu, text09, TFTLIGHTGREY, 0, [this]() {
+        this->changeMenu(wifiAPMenu.parentMenu, true);
+      });
+
+      LinkedList<String> uniqueSsids = LinkedList<String>();
+      LinkedList<int> ssidCounts = LinkedList<int>();
+      LinkedList<int> ssidAllSelected = LinkedList<int>();
+      const int ap_count = access_points->size();
+      for (int i = 0; i < ap_count; i++) {
+        AccessPoint ap = access_points->get(i);   // one copy per AP, as "Select APs" does
+        int idx = -1;
+        for (int u = 0; u < uniqueSsids.size(); u++) {
+          if (uniqueSsids.get(u) == ap.essid) { idx = u; break; }
+        }
+        if (idx < 0) {
+          uniqueSsids.add(ap.essid);
+          ssidCounts.add(1);
+          ssidAllSelected.add(ap.selected ? 1 : 0);
+        } else {
+          ssidCounts.set(idx, ssidCounts.get(idx) + 1);
+          if (!ap.selected) ssidAllSelected.set(idx, 0);
+        }
+      }
+
+      // One row per unique SSID; tapping selects every AP with that SSID, or
+      // deselects them all if they are already all selected. Selections are
+      // shared with the per-AP "Select APs" list (both set access_points[].selected).
+      for (int u = 0; u < uniqueSsids.size(); u++) {
+        const String essid = uniqueSsids.get(u);
+        const int nodeIdx = wifiAPMenu.list->size();
+        const String label = screenName(essid) + " (" + String(ssidCounts.get(u)) + ")";
+        this->addNodes(&wifiAPMenu, label.c_str(), TFTCYAN, 255, [this, essid, nodeIdx](){
+          const int n = access_points->size();
+          bool everySelected = true;
+          for (int i = 0; i < n; i++) {
+            AccessPoint ap = access_points->get(i);
+            if (ap.essid == essid && !ap.selected) { everySelected = false; break; }
+          }
+          const bool newState = !everySelected;
+          for (int i = 0; i < n; i++) {
+            AccessPoint ap = access_points->get(i);
+            if (ap.essid == essid) { ap.selected = newState; access_points->set(i, ap); }
+          }
+          MenuNode node = current_menu->list->get(nodeIdx);
+          node.selected = newState;
+          current_menu->list->set(nodeIdx, node);
+          this->changeMenu(current_menu, true);
+        }, ssidAllSelected.get(u) == 1);
+      }
+      this->changeMenu(&wifiAPMenu, true);
+    });
+
     this->addNodes(&wifiGeneralMenu, "View AP Info", TFTCYAN, KEYBOARD_ICO, [this](){
       wifiAPMenu.parentMenu = &wifiGeneralMenu;
 
