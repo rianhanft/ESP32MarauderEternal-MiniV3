@@ -35,6 +35,7 @@
 #include "StoragePaths.h"
 #include <SD.h>
 #include <memory>
+#include <cmath>
 #include "SPIFFS.h"
 
 extern GpsInterface gps_obj;
@@ -527,7 +528,182 @@ void showError(const char* message) {
   display_obj.tft.print(F("Center: exit"));
 }
 
+// --- SD-defined spoof source encoding --------------------------------------
+// Encodes OpenDroneID messages as the exact inverse of RemoteIdDecoder so a
+// spoof built from a file decodes back to the same values on any compliant
+// detector. ODID altitude/area fields are stored as (value + 1000) / 0.5.
+constexpr uint8_t ODID_PROTOCOL_VERSION = 0x02;  // F3411-22; decoder ignores it.
+
+void putLeU16(uint8_t* out, uint16_t value) {
+  out[0] = value & 0xFF;
+  out[1] = (value >> 8) & 0xFF;
+}
+void putLeI32(uint8_t* out, int32_t value) {
+  uint32_t u = static_cast<uint32_t>(value);
+  out[0] = u & 0xFF; out[1] = (u >> 8) & 0xFF;
+  out[2] = (u >> 16) & 0xFF; out[3] = (u >> 24) & 0xFF;
+}
+uint16_t encodeOdidAltitude(float meters) {
+  long raw = lroundf((meters + 1000.0f) * 2.0f);
+  if (raw < 0) raw = 0;
+  if (raw > 0xFFFF) raw = 0xFFFF;
+  return static_cast<uint16_t>(raw);
+}
+
+struct SpoofFields {
+  char mac[18] = "AA:BB:CC:DD:EE:01";
+  uint8_t idType = 1;               // 1 = CTA-2063-A serial, 2 = CAA reg.
+  uint8_t uaType = 2;               // 2 = multirotor
+  char uasId[21] = "MARAUDER-TEST-01";
+  double latitude = 0, longitude = 0;
+  float altitudeM = 0, heightM = 0;
+  float speedMps = 0, vspeedMps = 0;
+  uint16_t directionDeg = 0;
+  uint8_t opStatus = 2;             // 2 = airborne
+  char operatorId[21] = "";
+  double opLatitude = 0, opLongitude = 0;
+  float opAltitudeM = 0;
+  uint8_t channel = 6;
+  uint8_t methods = CAPTURE_METHOD_WIFI | CAPTURE_METHOD_BLE;
+  bool hasLocation = false;
+  bool hasOperator = false;
+};
+
+void encodeBasicId(uint8_t* m, const SpoofFields& f) {
+  memset(m, 0, CAPTURED_MESSAGE_SIZE);
+  m[0] = (0 << 4) | ODID_PROTOCOL_VERSION;
+  m[1] = (f.idType << 4) | (f.uaType & 0x0F);
+  strncpy(reinterpret_cast<char*>(m + 2), f.uasId, 20);
+}
+void encodeLocation(uint8_t* m, const SpoofFields& f) {
+  memset(m, 0, CAPTURED_MESSAGE_SIZE);
+  m[0] = (1 << 4) | ODID_PROTOCOL_VERSION;
+  const bool highSpeed = f.speedMps > 63.75f;
+  const bool west = f.directionDeg >= 180;
+  m[1] = ((f.opStatus & 0x0F) << 4) | (west ? 0x02 : 0x00) | (highSpeed ? 0x01 : 0x00);
+  m[2] = static_cast<uint8_t>(west ? (f.directionDeg - 180) : f.directionDeg);
+  long spd = highSpeed ? lroundf((f.speedMps - 63.75f) / 0.75f)
+                       : lroundf(f.speedMps / 0.25f);
+  if (spd < 0) spd = 0;
+  if (spd > 0xFF) spd = 0xFF;
+  m[3] = static_cast<uint8_t>(spd);
+  long vs = lroundf(f.vspeedMps / 0.5f);
+  if (vs < -128) vs = -128;
+  if (vs > 127) vs = 127;
+  m[4] = static_cast<uint8_t>(static_cast<int8_t>(vs));
+  putLeI32(m + 5, static_cast<int32_t>(llround(f.latitude * 1e7)));
+  putLeI32(m + 9, static_cast<int32_t>(llround(f.longitude * 1e7)));
+  putLeU16(m + 13, encodeOdidAltitude(f.altitudeM));   // pressure altitude
+  putLeU16(m + 15, encodeOdidAltitude(f.altitudeM));   // geodetic altitude
+  putLeU16(m + 17, encodeOdidAltitude(f.heightM));     // height above takeoff
+  m[19] = 0;                                           // accuracy unknown
+  m[20] = 0;
+  putLeU16(m + 21, 0);                                 // timestamp (valid)
+}
+void encodeSystem(uint8_t* m, const SpoofFields& f) {
+  memset(m, 0, CAPTURED_MESSAGE_SIZE);
+  m[0] = (4 << 4) | ODID_PROTOCOL_VERSION;
+  m[1] = 0x01;                                         // operator loc = live GNSS
+  putLeI32(m + 2, static_cast<int32_t>(llround(f.opLatitude * 1e7)));
+  putLeI32(m + 6, static_cast<int32_t>(llround(f.opLongitude * 1e7)));
+  putLeU16(m + 10, 1);                                 // area count
+  m[12] = 0;                                           // area radius / 10
+  putLeU16(m + 13, 0);                                 // area ceiling (invalid)
+  putLeU16(m + 15, 0);                                 // area floor (invalid)
+  m[17] = 0;                                           // class / category
+  putLeU16(m + 18, encodeOdidAltitude(f.opAltitudeM));
+  // bytes 20-23 system timestamp left 0; byte 24 reserved.
+}
+void encodeOperatorId(uint8_t* m, const SpoofFields& f) {
+  memset(m, 0, CAPTURED_MESSAGE_SIZE);
+  m[0] = (5 << 4) | ODID_PROTOCOL_VERSION;
+  m[1] = 0;                                            // operator ID type
+  strncpy(reinterpret_cast<char*>(m + 2), f.operatorId, 20);
+}
+
 }  // namespace
+
+bool loadSpoofFromFile(const char* path, CapturedDrone& target) {
+  #ifdef HAS_SD
+  auto waitAck = []() {
+    while (!c_btn.justPressed() && !l_btn.justPressed()) delay(5);
+    releaseControls();
+  };
+  if (!path || !SD.exists(path)) {
+    showError("Spoof file not found.\nPut remoteid_spoof.txt\non the SD card root.");
+    waitAck();
+    return false;
+  }
+  File file = SD.open(path, FILE_READ);
+  if (!file) {
+    showError("Cannot open spoof file.");
+    waitAck();
+    return false;
+  }
+
+  SpoofFields f;
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0 || line.startsWith("#") || line.startsWith(";")) continue;
+    const int eq = line.indexOf('=');
+    if (eq < 0) continue;
+    String key = line.substring(0, eq);
+    String val = line.substring(eq + 1);
+    key.trim();
+    val.trim();
+    key.toLowerCase();
+
+    if (key == "mac") strlcpy(f.mac, val.c_str(), sizeof(f.mac));
+    else if (key == "uas_id" || key == "id") strlcpy(f.uasId, val.c_str(), sizeof(f.uasId));
+    else if (key == "id_type") f.idType = (uint8_t)val.toInt();
+    else if (key == "ua_type") f.uaType = (uint8_t)val.toInt();
+    else if (key == "latitude" || key == "lat") { f.latitude = val.toDouble(); f.hasLocation = true; }
+    else if (key == "longitude" || key == "lon") { f.longitude = val.toDouble(); f.hasLocation = true; }
+    else if (key == "altitude_m" || key == "altitude") f.altitudeM = val.toFloat();
+    else if (key == "height_m" || key == "height") f.heightM = val.toFloat();
+    else if (key == "speed_mps" || key == "speed") f.speedMps = val.toFloat();
+    else if (key == "vspeed_mps" || key == "vertical_speed") f.vspeedMps = val.toFloat();
+    else if (key == "direction_deg" || key == "direction") {
+      long d = val.toInt() % 360; if (d < 0) d += 360; f.directionDeg = (uint16_t)d;
+    }
+    else if (key == "op_status" || key == "status") f.opStatus = (uint8_t)val.toInt();
+    else if (key == "operator_id") { strlcpy(f.operatorId, val.c_str(), sizeof(f.operatorId)); f.hasOperator = true; }
+    else if (key == "operator_latitude" || key == "op_lat") { f.opLatitude = val.toDouble(); f.hasOperator = true; }
+    else if (key == "operator_longitude" || key == "op_lon") { f.opLongitude = val.toDouble(); f.hasOperator = true; }
+    else if (key == "operator_altitude_m" || key == "op_alt") f.opAltitudeM = val.toFloat();
+    else if (key == "channel") f.channel = (uint8_t)val.toInt();
+    else if (key == "methods") f.methods = (uint8_t)val.toInt();
+  }
+  file.close();
+
+  memset(&target, 0, sizeof(target));
+  strlcpy(target.address, f.mac, sizeof(target.address));
+  strlcpy(target.id, f.uasId, sizeof(target.id));
+  target.channel = f.channel ? f.channel : 6;
+  target.methods = f.methods ? f.methods : (CAPTURE_METHOD_WIFI | CAPTURE_METHOD_BLE);
+  target.lastSeen = millis();
+
+  uint8_t mask = 0;
+  encodeBasicId(target.messages[0], f);
+  mask |= (1 << 0);
+  if (f.hasLocation) {
+    encodeLocation(target.messages[1], f);
+    mask |= (1 << 1);
+  }
+  if (f.hasOperator) {
+    encodeSystem(target.messages[4], f);
+    mask |= (1 << 4);
+    encodeOperatorId(target.messages[5], f);
+    mask |= (1 << 5);
+  }
+  target.messageMask = mask;
+  return target.messageMask != 0;
+  #else
+  (void)path; (void)target;
+  return false;
+  #endif
+}
 
 bool selectCapturedForSpoof(CapturedDrone& target) {
   releaseControls();
@@ -905,6 +1081,7 @@ bool exportRetained() { return false; }
 void runChecks() {}
 bool renderPreview(TFT_eSprite&, uint8_t) { return false; }
 bool selectCapturedForSpoof(CapturedDrone&) { return false; }
+bool loadSpoofFromFile(const char*, CapturedDrone&) { return false; }
 }
 
 #endif

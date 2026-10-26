@@ -35,6 +35,14 @@ bool renderPreview(TFT_eSprite& frame, uint8_t page = 5);
 // drone's last observed message of each type into `target`.
 bool selectCapturedForSpoof(CapturedDrone& target);
 
+// Builds a spoof target from a human-readable key=value file on the SD card
+// (default /remoteid_spoof.txt). The OpenDroneID messages are encoded as the
+// exact inverse of RemoteIdDecoder, so detectors decode them back to the file's
+// values. Returns true if at least a Basic ID message was built. On a missing
+// or unreadable file it shows an on-screen error and returns false.
+// Authorized testing only.
+bool loadSpoofFromFile(const char* path, CapturedDrone& target);
+
 }  // namespace DroneRemoteID
 
 #endif

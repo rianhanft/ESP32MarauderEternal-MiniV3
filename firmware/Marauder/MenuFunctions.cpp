@@ -5407,6 +5407,20 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
           DroneRemoteIDSpoofer::run();
         });
       });
+      this->addNodes(menu, "Drone Spoof (SD)", TFTRED, ATTACKS, [this]() {
+        // Build a spoof target from /remoteid_spoof.txt on the SD card instead
+        // of a live capture, then replay it through the same spoofer.
+        DroneRemoteID::CapturedDrone target{};
+        if (!DroneRemoteID::loadSpoofFromFile("/remoteid_spoof.txt", target) ||
+            !DroneRemoteIDSpoofer::selectTarget(target)) {
+          display_obj.init();
+          this->changeMenu(&nyanAttackMenu, true);
+          return;
+        }
+        this->confirmAction("Authorize Drone Spoof", &nyanAttackMenu, []() {
+          DroneRemoteIDSpoofer::run();
+        });
+      });
       break;
 
     #ifdef HAS_BT
