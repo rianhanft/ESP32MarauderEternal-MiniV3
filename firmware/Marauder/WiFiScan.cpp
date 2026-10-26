@@ -7409,11 +7409,6 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
     }
 
 
-    // --- temporary BT-after-spoof diagnostics: capture state at scan start ---
-    this->dbg_bt_pre = (int)esp_bt_controller_get_status();
-    this->dbg_nim_pre = NimBLEDevice::isInitialized();
-    this->dbg_wifi_mode = (int)WiFi.getMode();
-
     // A prior BLE feature (e.g. the Drone Spoofer, which drives both radios) can
     // leave NimBLE still reporting initialized; NimBLEDevice::init() would then
     // return early without actually re-initializing, and the scan detects
@@ -7425,14 +7420,11 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
     // heavily, and NimBLE's controller init can come up unusable -> wardrive then
     // detects no Bluetooth. If init reports failure, fully deinit and try once
     // more from a clean state. This only touches the BLE path, not WiFi/portal.
-    this->dbg_ble_init_ok = NimBLEDevice::init("");
-    if (!this->dbg_ble_init_ok) {
+    if (!NimBLEDevice::init("")) {
       NimBLEDevice::deinit(true);
       delay(100);
-      this->dbg_ble_init_ok = NimBLEDevice::init("");
+      NimBLEDevice::init("");
     }
-    this->dbg_bt_post = (int)esp_bt_controller_get_status();
-    this->dbg_bt_heap_k = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024;
     pBLEScan = NimBLEDevice::getScan(); //create new scan
     if ((scan_mode == BT_SCAN_ALL) ||
         (scan_mode == BT_SCAN_IBEACON) ||
@@ -7574,23 +7566,6 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
       pBLEScan->start(0, scanCompleteCB, false);
     }
     this->ble_initialized = true;
-
-    // --- temporary BT-after-spoof diagnostic (shows on the sniffer screen) ---
-    // btpre/btpost = esp_bt_controller status (2 = ENABLED, good). nim=1 means
-    // NimBLE was still initialized at entry (stale). wifiMode (0 = OFF, good;
-    // 1 = STA still up -> WiFi holding the radio). init=1 means NimBLE init ok.
-    #ifdef HAS_SCREEN
-      Serial.printf("DBG BT start: btpre=%d nim=%d wifiMode=%d init=%d btpost=%d heap=%uk scan=%d\n",
-                    this->dbg_bt_pre, this->dbg_nim_pre ? 1 : 0, this->dbg_wifi_mode,
-                    this->dbg_ble_init_ok ? 1 : 0, this->dbg_bt_post, this->dbg_bt_heap_k,
-                    pBLEScan ? 1 : 0);
-      display_obj.queueLine("DBG btpre=" + String(this->dbg_bt_pre) + " nim=" + String(this->dbg_nim_pre ? 1 : 0) +
-                            " wifiMode=" + String(this->dbg_wifi_mode));
-      display_obj.queueLine("DBG init=" + String(this->dbg_ble_init_ok ? 1 : 0) + " btpost=" + String(this->dbg_bt_post) +
-                            " scan=" + String(pBLEScan ? 1 : 0) + " heap=" + String(this->dbg_bt_heap_k) + "k");
-    #endif
-    this->bt_frames = 0;
-    this->dbg_last_rx_report = millis();
 
     this->setLEDMode(MODE_SNIFF);
 
@@ -12937,29 +12912,6 @@ void WiFiScan::runFoxHunt(uint32_t currentTime) {
 // Function for updating scan status
 void WiFiScan::main(uint32_t currentTime)
 {
-  // --- temporary BT-after-spoof RX-liveness diagnostic ---
-  // While a Bluetooth sniffer shows no devices, report every 2s how many BLE
-  // frames the radio actually received. Climbing = RX works (display issue);
-  // stuck at 0 with btpost=2 = radio starved (coexistence); btpost!=2 or init=0
-  // = the controller/NimBLE never came up.
-  #ifdef HAS_BT
-    if ((currentScanMode == BT_SCAN_ALL) || (currentScanMode == BT_SCAN_IBEACON) ||
-        (currentScanMode == BT_SCAN_SIMPLE) || (currentScanMode == BT_SCAN_SIMPLE_TWO) ||
-        (currentScanMode == BT_SCAN_FLIPPER) || (currentScanMode == BT_SCAN_AIRTAG)) {
-      const int dbg_dev = ble_devices ? ble_devices->size() : 0;
-      if (dbg_dev == 0 && currentTime - this->dbg_last_rx_report >= 2000) {
-        this->dbg_last_rx_report = currentTime;
-        Serial.printf("DBG BT rx: blefr=%lu dev=%d bt=%d\n",
-                      (unsigned long)this->bt_frames, dbg_dev,
-                      (int)esp_bt_controller_get_status());
-        #ifdef HAS_SCREEN
-          display_obj.queueLine("DBG blefr=" + String(this->bt_frames) + " dev=" + String(dbg_dev) +
-                                " bt=" + String((int)esp_bt_controller_get_status()));
-        #endif
-      }
-    }
-  #endif
-
   // WiFi operations
   if ((currentScanMode == WIFI_SCAN_PROBE) ||
   (currentScanMode == WIFI_SCAN_AP) ||

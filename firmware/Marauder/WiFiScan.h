@@ -631,11 +631,6 @@ class WiFiScan
     // Temporary: highest internal (DMA) free seen at scan init, so one on-screen
     // reading shows the healthy baseline and any post-Evil-Portal drop.
     unsigned dbg_peak_free_kb = 0;
-    // Temporary BT-after-spoof diagnostics.
-    uint32_t dbg_last_rx_report = 0;
-    int dbg_bt_pre = 0, dbg_bt_post = 0, dbg_wifi_mode = 0;
-    bool dbg_nim_pre = false, dbg_ble_init_ok = false;
-    unsigned dbg_bt_heap_k = 0;
     // Upper bound on the AP list when it lives in PSRAM, to keep the UI and
     // attack loops that iterate it responsive. PSRAM itself holds far more.
     static const int AP_LIST_PSRAM_CAP = 300;
