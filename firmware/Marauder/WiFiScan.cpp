@@ -3262,6 +3262,18 @@ bool WiFiScan::shutdownBLE() {
 
       NimBLEDevice::deinit();
 
+      // Shared-radio coexistence safety net. NimBLEDevice::deinit() only reaches
+      // the controller disable/deinit if its internal host-stop succeeds; if that
+      // bails early the BT controller is left ENABLED and keeps the shared 2.4GHz
+      // radio, so the next WiFi scan (AP scan / wardrive) receives nothing. If the
+      // controller is still up after deinit, force it down so WiFi can take the
+      // radio back. This is a no-op on the healthy path (status already idle) and
+      // the next NimBLEDevice::init() re-inits the controller from scratch.
+      if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED)
+        esp_bt_controller_disable();
+      if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED)
+        esp_bt_controller_deinit();
+
       this->_analyzer_value = 0;
       this->bt_frames = 0;
     
@@ -7350,6 +7362,22 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
       delete access_points;
       access_points = new LinkedList<AccessPoint>();
     }
+
+    // Shared-radio coexistence: before bringing BLE up, make sure the WiFi side
+    // has actually released the 2.4GHz radio. shutdownWiFi() normally skips its
+    // teardown while wifi_connected is set, and an Evil Portal leaves that flag
+    // pinned forever (its softAP netif lingers because the very teardown that
+    // would drop it is the one being skipped). The result is that WiFi keeps the
+    // radio and every Bluetooth scan after a portal -- including wardrive's --
+    // is starved and detects nothing. Clearing the flag here forces the full
+    // WiFi stop. We only reach this when STARTING a BT/wardrive feature, after
+    // StopScan has already torn down any live portal, so a running portal is
+    // never disturbed. Wardrive re-establishes its own WiFi afterwards.
+    if (this->wifi_initialized) {
+      this->wifi_connected = false;
+      this->shutdownWiFi();
+    }
+
     #ifdef HAS_SCREEN
       display_obj.print_delay_1 = 50;
       display_obj.print_delay_2 = 20;
