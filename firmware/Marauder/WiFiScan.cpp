@@ -4509,6 +4509,8 @@ void WiFiScan::RunEvilPortal(uint8_t scan_mode, uint16_t color) {
 
 // Function to start running a beacon scan
 void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
+  // Undo any Bluetooth coex bias a prior BT scan set, so WiFi RX is not starved.
+  esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
   if (scan_mode != WIFI_SCAN_AP_STA)
     startPcap("ap");
   else
@@ -6990,6 +6992,9 @@ void WiFiScan::displayWardriveStats() {
 
 // Function to start running a beacon scan
 void WiFiScan::RunBeaconScan(uint8_t scan_mode, uint16_t color) {
+  // Undo any Bluetooth coex bias a prior BT scan set, so WiFi RX is not starved
+  // (wardrive runs both radios, so balanced is also correct here).
+  esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
   if (scan_mode == WIFI_SCAN_AP)
     startPcap("beacon");
   else if (scan_mode == WIFI_SCAN_WAR_DRIVE) {
@@ -7413,31 +7418,27 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
     // leave NimBLE still reporting initialized; NimBLEDevice::init() would then
     // return early without actually re-initializing, and the scan detects
     // nothing. Clear any stale NimBLE state first so init() runs for real.
-    // Capture whether a prior feature (the spoofer) left NimBLE / the BT
-    // controller up when this scan started -- distinguishes a stuck stack
-    // (nim=1/ctrl=2) from a clean re-init that still gets no RX.
-    this->dbg_bt_nim_entry = NimBLEDevice::isInitialized();
-    this->dbg_bt_ctrl_entry = (int)esp_bt_controller_get_status();
-
     if (NimBLEDevice::isInitialized())
       NimBLEDevice::deinit(true);
-
-    // Temporary BT-after-spoof memory check: free internal SRAM the controller
-    // can draw on right before init. If this is much lower after running the
-    // Drone Spoofer than on a fresh boot, the spoofer isn't reclaiming SRAM.
-    this->dbg_bt_heap_k = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024;
-    this->dbg_bt_dma_k = heap_caps_get_largest_free_block(MALLOC_CAP_DMA) / 1024;
 
     // After an Evil Portal the WiFi side of the shared radio has been used
     // heavily, and NimBLE's controller init can come up unusable -> wardrive then
     // detects no Bluetooth. If init reports failure, fully deinit and try once
     // more from a clean state. This only touches the BLE path, not WiFi/portal.
-    this->dbg_bt_init_ok = NimBLEDevice::init("");
-    if (!this->dbg_bt_init_ok) {
+    if (!NimBLEDevice::init("")) {
       NimBLEDevice::deinit(true);
       delay(100);
-      this->dbg_bt_init_ok = NimBLEDevice::init("");
+      NimBLEDevice::init("");
     }
+
+    // A session that drove WiFi and BT together (the Drone Spoofer) can leave the
+    // software coexistence arbiter biased to WiFi, so a following BLE scan comes
+    // up with a clean controller and enough RAM yet receives nothing. For a pure
+    // Bluetooth scan, bias the shared radio back to Bluetooth so RX works again.
+    // Wardrive / detect-follow keep the balanced default (they need both radios).
+    if ((scan_mode != WIFI_SCAN_WAR_DRIVE) && (scan_mode != WIFI_SCAN_DETECT_FOLLOW))
+      esp_coex_preference_set(ESP_COEX_PREFER_BT);
+
     pBLEScan = NimBLEDevice::getScan(); //create new scan
     if ((scan_mode == BT_SCAN_ALL) ||
         (scan_mode == BT_SCAN_IBEACON) ||
@@ -7579,19 +7580,6 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
       pBLEScan->start(0, scanCompleteCB, false);
     }
     this->ble_initialized = true;
-
-    // Temporary one-line memory/init readout on the sniffer screen. Compare the
-    // free/blk numbers on a fresh-boot BT scan vs one run right after the Drone
-    // Spoofer: a big drop = SRAM not reclaimed; init=0 = NimBLE failed to come up.
-    #ifdef HAS_SCREEN
-      Serial.printf("DBG BT mem: free=%uk blk=%uk nim=%d ctrl=%d init=%d\n",
-                    this->dbg_bt_heap_k, this->dbg_bt_dma_k, this->dbg_bt_nim_entry ? 1 : 0,
-                    this->dbg_bt_ctrl_entry, this->dbg_bt_init_ok ? 1 : 0);
-      display_obj.queueLine("free=" + String(this->dbg_bt_heap_k) + "k blk=" + String(this->dbg_bt_dma_k) +
-                            "k nim=" + String(this->dbg_bt_nim_entry ? 1 : 0) +
-                            " ctrl=" + String(this->dbg_bt_ctrl_entry) +
-                            " init=" + String(this->dbg_bt_init_ok ? 1 : 0));
-    #endif
 
     this->setLEDMode(MODE_SNIFF);
 
