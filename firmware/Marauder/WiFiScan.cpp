@@ -4511,6 +4511,16 @@ void WiFiScan::RunEvilPortal(uint8_t scan_mode, uint16_t color) {
 void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
   // Undo any Bluetooth coex bias a prior BT scan set, so WiFi RX is not starved.
   esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+  // Free a BLE device list left by a long Bluetooth sniff before WiFi init: it
+  // sits in internal SRAM (two Strings per device) and fragments the DMA heap,
+  // so esp_wifi_init() can fail for lack of a contiguous block and the scan
+  // finds no APs. Rebuilt by the next BLE scan.
+  #ifdef HAS_BT
+    if (ble_devices && ble_devices->size() > 0) {
+      delete ble_devices;
+      ble_devices = new LinkedList<BleDevice>();
+    }
+  #endif
   if (scan_mode != WIFI_SCAN_AP_STA)
     startPcap("ap");
   else
@@ -6995,6 +7005,15 @@ void WiFiScan::RunBeaconScan(uint8_t scan_mode, uint16_t color) {
   // Undo any Bluetooth coex bias a prior BT scan set, so WiFi RX is not starved
   // (wardrive runs both radios, so balanced is also correct here).
   esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+  // Free a BLE device list left by a long Bluetooth sniff before WiFi init (see
+  // RunAPScan): it fragments the internal DMA heap and can make the scan find no
+  // APs. For wardrive this just gives a fresh BLE list, which it repopulates.
+  #ifdef HAS_BT
+    if (ble_devices && ble_devices->size() > 0) {
+      delete ble_devices;
+      ble_devices = new LinkedList<BleDevice>();
+    }
+  #endif
   if (scan_mode == WIFI_SCAN_AP)
     startPcap("beacon");
   else if (scan_mode == WIFI_SCAN_WAR_DRIVE) {
