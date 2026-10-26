@@ -4567,6 +4567,21 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
     esp_event_loop_create_default();
   #endif
   this->setWiFiMode(WIFI_MODE_NULL, apSnifferCallbackFull);
+
+  // Restart the channel sweep from the top (same reasoning as RunBeaconScan):
+  // dual_band_channel_index / set_channel are shared members left partway
+  // through the table by other modes, so after e.g. a Bluetooth sniffer this
+  // scan would otherwise start deep in the 5GHz block and take far too long to
+  // reach the 2.4GHz channels, looking like it finds nothing. Only reset when
+  // ChanHop is on so a fixed single-channel selection is preserved.
+  if (settings_obj.loadSetting<bool>("ChanHop")) {
+    #ifdef HAS_DUAL_BAND
+      this->dual_band_channel_index = 0;
+      this->set_channel = this->dual_band_channels[0];
+    #else
+      this->set_channel = 1;
+    #endif
+  }
   this->changeChannel(this->set_channel);
   this->wifi_initialized = true;
 
@@ -7047,6 +7062,25 @@ void WiFiScan::RunBeaconScan(uint8_t scan_mode, uint16_t color) {
       esp_event_loop_create_default();
     #endif
     this->setWiFiMode(WIFI_MODE_NULL, beaconSnifferCallback);
+
+    // Restart the channel sweep from the top every time a hopping AP scan
+    // begins. dual_band_channel_index / set_channel are shared members that
+    // other modes (wardrive's decoy step, channel-hopping WiFi/BLE scans,
+    // the boot warm-up) leave partway through the channel table. Without this
+    // reset a Scan AP run started *after* one of those began deep in the 5GHz
+    // block and spent so long sweeping 5GHz before wrapping back to 2.4GHz
+    // that 2.4GHz APs appeared never to show up -- which is exactly the "after
+    // a Bluetooth sniffer, Scan AP jumps from its usual start channel and finds
+    // nothing" symptom. Match the clean boot-time start (WIFI_SCAN_ALL path).
+    // Only when ChanHop is on, so a fixed single-channel selection is kept.
+    if (settings_obj.loadSetting<bool>("ChanHop")) {
+      #ifdef HAS_DUAL_BAND
+        this->dual_band_channel_index = 0;
+        this->set_channel = this->dual_band_channels[0];
+      #else
+        this->set_channel = 1;
+      #endif
+    }
     this->changeChannel(this->set_channel);
   }
   this->wifi_initialized = true;
