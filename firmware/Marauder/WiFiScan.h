@@ -631,6 +631,15 @@ class WiFiScan
     // Temporary: highest internal (DMA) free seen at scan init, so one on-screen
     // reading shows the healthy baseline and any post-Evil-Portal drop.
     unsigned dbg_peak_free_kb = 0;
+    // Temporary WiFi-handoff diagnostics: return codes from the last WiFi
+    // bring-up, so an on-screen/Serial reading distinguishes "init failed"
+    // (memory) from "init OK but receives nothing" (radio/coexistence).
+    int dbg_wifi_init_err = 0;
+    int dbg_wifi_mode_err = 0;
+    int dbg_wifi_start_err = 0;
+    int dbg_wifi_promisc_err = 0;
+    uint32_t dbg_last_rx_report = 0;
+    void reportWifiBringup(const char* where);
     // Upper bound on the AP list when it lives in PSRAM, to keep the UI and
     // attack loops that iterate it responsive. PSRAM itself holds far more.
     static const int AP_LIST_PSRAM_CAP = 300;

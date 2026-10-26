@@ -3978,12 +3978,44 @@ void WiFiScan::writeNetworkInfo() {
 
 void WiFiScan::setWiFiMode(wifi_mode_t mode, wifi_promiscuous_cb_t cb) {
   esp_wifi_set_storage(WIFI_STORAGE_RAM);
-  esp_wifi_set_mode(mode);
-  esp_wifi_start();
+  this->dbg_wifi_mode_err = esp_wifi_set_mode(mode);
+  this->dbg_wifi_start_err = esp_wifi_start();
   this->setMac();
-  esp_wifi_set_promiscuous(true);
+  this->dbg_wifi_promisc_err = esp_wifi_set_promiscuous(true);
   esp_wifi_set_promiscuous_filter(&filt);
   esp_wifi_set_promiscuous_rx_cb(cb);
+}
+
+// Temporary diagnostic: report the last WiFi bring-up outcome and the heap/radio
+// state to both the scan text area and Serial. Lets us tell, after a Bluetooth
+// session, whether WiFi failed to initialize (a memory problem -> nonzero
+// init/start codes, low heap) or initialized fine but receives nothing (a radio
+// / coexistence problem -> zero codes but beacon_frames stays 0).
+void WiFiScan::reportWifiBringup(const char* where) {
+  unsigned heap_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024;
+  unsigned dma_blk  = heap_caps_get_largest_free_block(MALLOC_CAP_DMA) / 1024;
+  unsigned psram_kb = 0;
+  #ifdef HAS_PSRAM
+    psram_kb = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024;
+  #endif
+  int bt_status = -1;
+  #ifdef HAS_BT
+    bt_status = (int)esp_bt_controller_get_status();
+  #endif
+  // Compact two lines for the on-screen scan list.
+  String l1 = "DBG " + String(where) + " init=" + String(this->dbg_wifi_init_err) +
+              " mode=" + String(this->dbg_wifi_mode_err) +
+              " start=" + String(this->dbg_wifi_start_err) +
+              " prom=" + String(this->dbg_wifi_promisc_err);
+  String l2 = "DBG heap=" + String(heap_int) + "k dma=" + String(dma_blk) +
+              "k psram=" + String(psram_kb) + "k bt=" + String(bt_status) +
+              " listPsram=" + String(this->list_in_psram ? 1 : 0);
+  Serial.println(l1);
+  Serial.println(l2);
+  #ifdef HAS_SCREEN
+    display_obj.queueLine(l1);
+    display_obj.queueLine(l2);
+  #endif
 }
 
 void WiFiScan::prepareScanStage(uint16_t color_1, uint16_t color_2) {
@@ -4546,12 +4578,13 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
   esp_netif_init();
   esp_event_loop_create_default();
 
-  esp_wifi_init(&cfg2);
+  this->dbg_wifi_init_err = esp_wifi_init(&cfg2);
   #ifdef HAS_IDF_3
     esp_wifi_set_country(&country);
     esp_event_loop_create_default();
   #endif
   this->setWiFiMode(WIFI_MODE_NULL, apSnifferCallbackFull);
+  this->beacon_frames = 0;  // fresh RX-liveness count for the diagnostic
 
   // Restart the channel sweep from the top (same reasoning as RunBeaconScan):
   // shared channel vars left partway through the table by other modes made this
@@ -4570,6 +4603,7 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
   // not exhaust the internal (DMA) heap. This does not affect the WiFi driver's
   // own DMA buffers (those are forced internal), so RX is unchanged.
   this->enableApListPsram();
+  this->reportWifiBringup("ap_sta");
 
   initTime = millis();
 }
@@ -6493,6 +6527,24 @@ void WiFiScan::executeWarDrive() {
 
       int scan_status = WiFi.scanComplete();
 
+      // Temporary wardrive RX diagnostic (Serial). scan_status: -1 IDLE,
+      // -2 FAILED, >=0 = AP count from the last per-channel scan. If this stays
+      // -2/0 after a Bluetooth session while it worked on boot, the STA scan is
+      // being starved -> a radio/coexistence problem, not channel order.
+      if (millis() - this->dbg_last_rx_report >= 2000) {
+        this->dbg_last_rx_report = millis();
+        int bt_status = -1;
+        #ifdef HAS_BT
+          bt_status = (int)esp_bt_controller_get_status();
+        #endif
+        Serial.println("DBG wardrive status=" + String(scan_status) +
+                       " ble=" + String(this->ble_scanning ? 1 : 0) +
+                       " chIdx=" + String(this->wardrive_channel_index) +
+                       " ch=" + String(this->set_channel) +
+                       " bt=" + String(bt_status) +
+                       " heapk=" + String(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
+      }
+
       if (scan_status == WIFI_SCAN_RUNNING) {
         delay(1);
         return;
@@ -7037,12 +7089,13 @@ void WiFiScan::RunBeaconScan(uint8_t scan_mode, uint16_t color) {
 
     // Stock init flow: esp_wifi_init() no-ops if the radio is still up after an
     // Evil Portal, and setWiFiMode() reconfigures it in place (see RunAPScan).
-    esp_wifi_init(&cfg2);
+    this->dbg_wifi_init_err = esp_wifi_init(&cfg2);
     #ifdef HAS_IDF_3
       esp_wifi_set_country(&country);
       esp_event_loop_create_default();
     #endif
     this->setWiFiMode(WIFI_MODE_NULL, beaconSnifferCallback);
+    this->beacon_frames = 0;  // fresh RX-liveness count for the diagnostic
 
     // Restart the channel sweep from the top every time an AP scan begins.
     // dual_band_channel_index / set_channel are shared members that other
@@ -7060,6 +7113,7 @@ void WiFiScan::RunBeaconScan(uint8_t scan_mode, uint16_t color) {
       this->set_channel = 1;
     #endif
     this->changeChannel(this->set_channel);
+    this->reportWifiBringup("beacon");
   }
   this->wifi_initialized = true;
   initTime = millis();
@@ -12920,7 +12974,29 @@ void WiFiScan::main(uint32_t currentTime)
       initTime = millis();
       channelHop();
     }
-    if ((currentScanMode == WIFI_SCAN_AP) || 
+    // Temporary RX-liveness diagnostic for the WiFi-after-Bluetooth problem.
+    // Every 2s while the AP list is still empty, report how many WiFi frames
+    // the radio has actually received. beacon_frames climbing but no APs = a
+    // display/list problem; beacon_frames stuck at 0 (with init codes all 0) =
+    // the radio is initialized but receiving nothing (coexistence starvation);
+    // nonzero init codes = WiFi failed to initialize (memory). Self-limits once
+    // APs appear, so it does not clutter a healthy scan.
+    if ((currentScanMode == WIFI_SCAN_AP) || (currentScanMode == WIFI_SCAN_AP_STA)) {
+      int ap_count = access_points ? access_points->size() : 0;
+      if (currentTime - this->dbg_last_rx_report >= 2000) {
+        this->dbg_last_rx_report = currentTime;
+        Serial.println("DBG rx frames=" + String(this->beacon_frames) +
+                       " aps=" + String(ap_count) + " ch=" + String(this->set_channel));
+        #ifdef HAS_SCREEN
+          if (ap_count == 0)
+            display_obj.queueLine("DBG rx=" + String(this->beacon_frames) +
+                                  " ch=" + String(this->set_channel) +
+                                  " init=" + String(this->dbg_wifi_init_err) +
+                                  " start=" + String(this->dbg_wifi_start_err));
+        #endif
+      }
+    }
+    if ((currentScanMode == WIFI_SCAN_AP) ||
         (currentScanMode == WIFI_SCAN_PROBE) ||
         (currentScanMode == WIFI_SCAN_DEAUTH)){
       #ifdef HAS_ILI9341
