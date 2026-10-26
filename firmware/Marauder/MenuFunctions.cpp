@@ -3761,6 +3761,65 @@ void MenuFunctions::buildWiFiGeneralMenu()
       this->changeMenu(&wifiAPMenu, true);
     });
 
+    // Select every AP that shares an SSID -- handy for mesh / enterprise / range
+    // extended networks that broadcast the same SSID from many BSSIDs/channels.
+    // One row per unique SSID; tapping it selects (or, if already all selected,
+    // deselects) every AP broadcasting that SSID. Selections are shared with the
+    // regular "Select APs" list since both toggle access_points[].selected.
+    this->addNodes(&wifiGeneralMenu, "Select by SSID", TFTNAVY, KEYBOARD_ICO, [this](){
+      wifiAPMenu.parentMenu = &wifiGeneralMenu;
+      wifiAPMenu.list->clear();
+      this->addNodes(&wifiAPMenu, text09, TFTLIGHTGREY, 0, [this]() {
+        this->changeMenu(wifiAPMenu.parentMenu, true);
+      });
+
+      for (int i = 0; i < access_points->size(); i++) {
+        const String essid = access_points->get(i).essid;
+        // Emit a row only at the first occurrence of each SSID.
+        bool firstOccurrence = true;
+        for (int j = 0; j < i; j++) {
+          if (access_points->get(j).essid == essid) { firstOccurrence = false; break; }
+        }
+        if (!firstOccurrence) continue;
+
+        int count = 0;
+        bool allSelected = true;
+        for (int j = 0; j < access_points->size(); j++) {
+          if (access_points->get(j).essid == essid) {
+            count++;
+            if (!access_points->get(j).selected) allSelected = false;
+          }
+        }
+
+        const int nodeIdx = wifiAPMenu.list->size();
+        const String label = screenName(essid) + " (" + String(count) + ")";
+        this->addNodes(&wifiAPMenu, label.c_str(), TFTCYAN, 255, [this, essid, nodeIdx](){
+          // If every AP with this SSID is already selected, clear them all;
+          // otherwise select them all.
+          bool everySelected = true;
+          for (int j = 0; j < access_points->size(); j++) {
+            if (access_points->get(j).essid == essid && !access_points->get(j).selected) {
+              everySelected = false;
+              break;
+            }
+          }
+          const bool newState = !everySelected;
+          for (int j = 0; j < access_points->size(); j++) {
+            if (access_points->get(j).essid == essid) {
+              AccessPoint ap = access_points->get(j);
+              ap.selected = newState;
+              access_points->set(j, ap);
+            }
+          }
+          MenuNode node = current_menu->list->get(nodeIdx);
+          node.selected = newState;
+          current_menu->list->set(nodeIdx, node);
+          this->changeMenu(current_menu, true);
+        }, allSelected);
+      }
+      this->changeMenu(&wifiAPMenu, true);
+    });
+
     this->addNodes(&wifiGeneralMenu, "View AP Info", TFTCYAN, KEYBOARD_ICO, [this](){
       wifiAPMenu.parentMenu = &wifiGeneralMenu;
 
