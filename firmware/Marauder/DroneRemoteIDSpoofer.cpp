@@ -333,6 +333,13 @@ void run() {
   esp_wifi_set_promiscuous(false);
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
+  // The beacon TX path used raw esp_wifi (esp_wifi_80211_tx / set_channel), and
+  // WiFi.mode(WIFI_OFF) does not reliably stop that on the C5, so the WiFi
+  // controller can keep the shared radio and starve the next Bluetooth scan.
+  // Force the controller fully down; both calls are harmless no-ops if WiFi is
+  // already stopped/deinitialized, and the next WiFi feature re-inits from cfg.
+  esp_wifi_stop();
+  esp_wifi_deinit();
   delay(50);
   NimBLEDevice::deinit(true);
   for (uint8_t attempt = 0; attempt < 3 && NimBLEDevice::isInitialized(); attempt++) {
