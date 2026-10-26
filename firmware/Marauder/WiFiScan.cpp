@@ -2927,6 +2927,13 @@ void WiFiScan::StartScan(uint8_t scan_mode, uint16_t color) {
     this->reloadGeofences();
     this->geofence_paused = false;
     this->active_geofence_name = "";
+    // Always start the wardrive channel sweep from the top. wardrive_channel_index
+    // is a member that is only reset when it wraps, so a previous session (or
+    // other WiFi activity before it) left it mid-array -- which made wardrive
+    // begin on a different channel and shifted the every-4th-channel BLE scan
+    // cadence, so the channel order and Bluetooth detection looked different
+    // depending on what ran beforehand (e.g. an Evil Portal).
+    this->wardrive_channel_index = 0;
     #ifdef HAS_BT
       RunBluetoothScan(scan_mode, color);
     #endif
