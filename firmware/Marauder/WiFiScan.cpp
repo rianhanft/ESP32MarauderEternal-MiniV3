@@ -7413,6 +7413,12 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
     // leave NimBLE still reporting initialized; NimBLEDevice::init() would then
     // return early without actually re-initializing, and the scan detects
     // nothing. Clear any stale NimBLE state first so init() runs for real.
+    // Capture whether a prior feature (the spoofer) left NimBLE / the BT
+    // controller up when this scan started -- distinguishes a stuck stack
+    // (nim=1/ctrl=2) from a clean re-init that still gets no RX.
+    this->dbg_bt_nim_entry = NimBLEDevice::isInitialized();
+    this->dbg_bt_ctrl_entry = (int)esp_bt_controller_get_status();
+
     if (NimBLEDevice::isInitialized())
       NimBLEDevice::deinit(true);
 
@@ -7578,10 +7584,13 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
     // free/blk numbers on a fresh-boot BT scan vs one run right after the Drone
     // Spoofer: a big drop = SRAM not reclaimed; init=0 = NimBLE failed to come up.
     #ifdef HAS_SCREEN
-      Serial.printf("DBG BT mem: free=%uk blk=%uk init=%d\n",
-                    this->dbg_bt_heap_k, this->dbg_bt_dma_k, this->dbg_bt_init_ok ? 1 : 0);
-      display_obj.queueLine("Mem free=" + String(this->dbg_bt_heap_k) + "k blk=" +
-                            String(this->dbg_bt_dma_k) + "k init=" + String(this->dbg_bt_init_ok ? 1 : 0));
+      Serial.printf("DBG BT mem: free=%uk blk=%uk nim=%d ctrl=%d init=%d\n",
+                    this->dbg_bt_heap_k, this->dbg_bt_dma_k, this->dbg_bt_nim_entry ? 1 : 0,
+                    this->dbg_bt_ctrl_entry, this->dbg_bt_init_ok ? 1 : 0);
+      display_obj.queueLine("free=" + String(this->dbg_bt_heap_k) + "k blk=" + String(this->dbg_bt_dma_k) +
+                            "k nim=" + String(this->dbg_bt_nim_entry ? 1 : 0) +
+                            " ctrl=" + String(this->dbg_bt_ctrl_entry) +
+                            " init=" + String(this->dbg_bt_init_ok ? 1 : 0));
     #endif
 
     this->setLEDMode(MODE_SNIFF);

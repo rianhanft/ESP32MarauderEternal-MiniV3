@@ -634,6 +634,8 @@ class WiFiScan
     // Temporary BT-after-spoof memory check (one on-screen line).
     unsigned dbg_bt_heap_k = 0, dbg_bt_dma_k = 0;
     bool dbg_bt_init_ok = false;
+    bool dbg_bt_nim_entry = false;   // NimBLE still initialized when BT scan started?
+    int dbg_bt_ctrl_entry = 0;       // BT controller status on entry (2 = enabled)
     // Upper bound on the AP list when it lives in PSRAM, to keep the UI and
     // attack loops that iterate it responsive. PSRAM itself holds far more.
     static const int AP_LIST_PSRAM_CAP = 300;

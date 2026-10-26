@@ -322,6 +322,8 @@ void run() {
 
   if (advertising->isAdvertising())
     advertising->stop();
+  NimBLEDevice::stopAdvertising();
+  delay(60);  // let the BLE host settle so nimble_port_stop() can complete
 
   // Shared-radio coexistence teardown. The spoofer drives BOTH radios (BLE
   // advertising + raw WiFi beacon TX), so it must hand the radio back clean or
