@@ -7409,6 +7409,13 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
     }
 
 
+    // A prior BLE feature (e.g. the Drone Spoofer, which drives both radios) can
+    // leave NimBLE still reporting initialized; NimBLEDevice::init() would then
+    // return early without actually re-initializing, and the scan detects
+    // nothing. Clear any stale NimBLE state first so init() runs for real.
+    if (NimBLEDevice::isInitialized())
+      NimBLEDevice::deinit(true);
+
     // After an Evil Portal the WiFi side of the shared radio has been used
     // heavily, and NimBLE's controller init can come up unusable -> wardrive then
     // detects no Bluetooth. If init reports failure, fully deinit and try once

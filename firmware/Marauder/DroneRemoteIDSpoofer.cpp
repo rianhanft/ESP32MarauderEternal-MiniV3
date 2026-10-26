@@ -18,6 +18,7 @@
 #include <NimBLEDevice.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include <esp_bt.h>
 
 #include "Display.h"
 #include "Switches.h"
@@ -321,9 +322,29 @@ void run() {
 
   if (advertising->isAdvertising())
     advertising->stop();
-  NimBLEDevice::deinit(true);
+
+  // Shared-radio coexistence teardown. The spoofer drives BOTH radios (BLE
+  // advertising + raw WiFi beacon TX), so it must hand the radio back clean or
+  // the next Bluetooth scan is starved and detects nothing. Release the WiFi
+  // side first so the BT controller is torn down with the radio already idle,
+  // then fully stop NimBLE. NimBLEDevice::deinit() only clears NimBLE's state
+  // and releases the BT controller if its host-stop succeeds; retry until it
+  // reports de-initialized so the next NimBLEDevice::init() actually re-inits.
+  esp_wifi_set_promiscuous(false);
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
+  delay(50);
+  NimBLEDevice::deinit(true);
+  for (uint8_t attempt = 0; attempt < 3 && NimBLEDevice::isInitialized(); attempt++) {
+    delay(60);
+    NimBLEDevice::deinit(true);
+  }
+  // Last-resort controller release if the host stop never completed, so WiFi
+  // (and a re-init of BLE) can take the radio back.
+  if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED)
+    esp_bt_controller_disable();
+  if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED)
+    esp_bt_controller_deinit();
   delay(20);
   releaseButton(c_btn);
   display_obj.tft.setTextDatum(TL_DATUM);
