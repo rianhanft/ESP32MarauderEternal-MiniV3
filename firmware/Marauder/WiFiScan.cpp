@@ -7416,14 +7416,21 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
     if (NimBLEDevice::isInitialized())
       NimBLEDevice::deinit(true);
 
+    // Temporary BT-after-spoof memory check: free internal SRAM the controller
+    // can draw on right before init. If this is much lower after running the
+    // Drone Spoofer than on a fresh boot, the spoofer isn't reclaiming SRAM.
+    this->dbg_bt_heap_k = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024;
+    this->dbg_bt_dma_k = heap_caps_get_largest_free_block(MALLOC_CAP_DMA) / 1024;
+
     // After an Evil Portal the WiFi side of the shared radio has been used
     // heavily, and NimBLE's controller init can come up unusable -> wardrive then
     // detects no Bluetooth. If init reports failure, fully deinit and try once
     // more from a clean state. This only touches the BLE path, not WiFi/portal.
-    if (!NimBLEDevice::init("")) {
+    this->dbg_bt_init_ok = NimBLEDevice::init("");
+    if (!this->dbg_bt_init_ok) {
       NimBLEDevice::deinit(true);
       delay(100);
-      NimBLEDevice::init("");
+      this->dbg_bt_init_ok = NimBLEDevice::init("");
     }
     pBLEScan = NimBLEDevice::getScan(); //create new scan
     if ((scan_mode == BT_SCAN_ALL) ||
@@ -7566,6 +7573,16 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
       pBLEScan->start(0, scanCompleteCB, false);
     }
     this->ble_initialized = true;
+
+    // Temporary one-line memory/init readout on the sniffer screen. Compare the
+    // free/blk numbers on a fresh-boot BT scan vs one run right after the Drone
+    // Spoofer: a big drop = SRAM not reclaimed; init=0 = NimBLE failed to come up.
+    #ifdef HAS_SCREEN
+      Serial.printf("DBG BT mem: free=%uk blk=%uk init=%d\n",
+                    this->dbg_bt_heap_k, this->dbg_bt_dma_k, this->dbg_bt_init_ok ? 1 : 0);
+      display_obj.queueLine("Mem free=" + String(this->dbg_bt_heap_k) + "k blk=" +
+                            String(this->dbg_bt_dma_k) + "k init=" + String(this->dbg_bt_init_ok ? 1 : 0));
+    #endif
 
     this->setLEDMode(MODE_SNIFF);
 
