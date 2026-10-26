@@ -2004,21 +2004,6 @@ void WiFiScan::RunSetup() {
   // for AP scan low-memory reporting (was declared but never initialized)
   ap_list_full_reported = false;
 
-  // Trim the Wi-Fi driver's internal (DMA) buffer pool on the C5/IDF5 boards.
-  // The IDF default (static_rx 10 / dynamic_rx 32 / dynamic_tx 32) reserves a
-  // large amount of internal DMA heap, which this heavy build can't spare: a
-  // dense dual-band scan grows the dynamic RX pool until free internal heap is
-  // too low to start the next scan or bring up the Evil Portal softAP (the
-  // "scan fails after a portal" / "can't join after a big scan" failures).
-  // A scanner and a low-traffic captive portal don't need the full pool; smaller
-  // bounded counts leave headroom across the Wi-Fi mode transitions. cfg drives
-  // Evil Portal (esp_wifi_init(&cfg)); cfg2 drives the scans (esp_wifi_init(&cfg2)).
-  #ifdef HAS_IDF_3
-    cfg.static_rx_buf_num   = 8;   cfg2.static_rx_buf_num   = 8;
-    cfg.dynamic_rx_buf_num  = 16;  cfg2.dynamic_rx_buf_num  = 16;
-    cfg.dynamic_tx_buf_num  = 16;  cfg2.dynamic_tx_buf_num  = 16;
-  #endif
-
   settings_obj.loadSetting<bool>("ChanHop");
 
   File api_settings_file;
@@ -4569,19 +4554,15 @@ void WiFiScan::RunAPScan(uint8_t scan_mode, uint16_t color) {
   this->setWiFiMode(WIFI_MODE_NULL, apSnifferCallbackFull);
 
   // Restart the channel sweep from the top (same reasoning as RunBeaconScan):
-  // dual_band_channel_index / set_channel are shared members left partway
-  // through the table by other modes, so after e.g. a Bluetooth sniffer this
-  // scan would otherwise start deep in the 5GHz block and take far too long to
-  // reach the 2.4GHz channels, looking like it finds nothing. Only reset when
-  // ChanHop is on so a fixed single-channel selection is preserved.
-  if (settings_obj.loadSetting<bool>("ChanHop")) {
-    #ifdef HAS_DUAL_BAND
-      this->dual_band_channel_index = 0;
-      this->set_channel = this->dual_band_channels[0];
-    #else
-      this->set_channel = 1;
-    #endif
-  }
+  // shared channel vars left partway through the table by other modes made this
+  // scan start deep in the 5GHz block and take far too long to reach 2.4GHz,
+  // looking like it finds nothing. Force the clean boot-time start.
+  #ifdef HAS_DUAL_BAND
+    this->dual_band_channel_index = 0;
+    this->set_channel = this->dual_band_channels[0];
+  #else
+    this->set_channel = 1;
+  #endif
   this->changeChannel(this->set_channel);
   this->wifi_initialized = true;
 
@@ -7063,24 +7044,21 @@ void WiFiScan::RunBeaconScan(uint8_t scan_mode, uint16_t color) {
     #endif
     this->setWiFiMode(WIFI_MODE_NULL, beaconSnifferCallback);
 
-    // Restart the channel sweep from the top every time a hopping AP scan
-    // begins. dual_band_channel_index / set_channel are shared members that
-    // other modes (wardrive's decoy step, channel-hopping WiFi/BLE scans,
-    // the boot warm-up) leave partway through the channel table. Without this
-    // reset a Scan AP run started *after* one of those began deep in the 5GHz
-    // block and spent so long sweeping 5GHz before wrapping back to 2.4GHz
-    // that 2.4GHz APs appeared never to show up -- which is exactly the "after
-    // a Bluetooth sniffer, Scan AP jumps from its usual start channel and finds
-    // nothing" symptom. Match the clean boot-time start (WIFI_SCAN_ALL path).
-    // Only when ChanHop is on, so a fixed single-channel selection is kept.
-    if (settings_obj.loadSetting<bool>("ChanHop")) {
-      #ifdef HAS_DUAL_BAND
-        this->dual_band_channel_index = 0;
-        this->set_channel = this->dual_band_channels[0];
-      #else
-        this->set_channel = 1;
-      #endif
-    }
+    // Restart the channel sweep from the top every time an AP scan begins.
+    // dual_band_channel_index / set_channel are shared members that other
+    // modes (wardrive's per-channel scan, channel-hopping WiFi/BLE scans) leave
+    // partway through the channel table. Stock starts AP scan from channel 1
+    // because nothing leaves those vars stale; this build can, so a Scan AP run
+    // started after e.g. a wardrive/Bluetooth session began deep in the 5GHz
+    // block and took far too long to wrap back to the 2.4GHz channels, looking
+    // like it finds nothing and starts on the wrong channel. Force the clean
+    // boot-time start here.
+    #ifdef HAS_DUAL_BAND
+      this->dual_band_channel_index = 0;
+      this->set_channel = this->dual_band_channels[0];
+    #else
+      this->set_channel = 1;
+    #endif
     this->changeChannel(this->set_channel);
   }
   this->wifi_initialized = true;
