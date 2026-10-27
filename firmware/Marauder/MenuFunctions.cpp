@@ -711,6 +711,7 @@ void MenuFunctions::main(uint32_t currentTime)
             (wifi_scan_obj.currentScanMode == REMOTE_ID_SCAN_ALL) ||
             (wifi_scan_obj.currentScanMode == REMOTE_ID_SCAN_TARGET) ||
             (wifi_scan_obj.currentScanMode == WIFI_SCAN_CSI_MOTION) ||
+            (wifi_scan_obj.currentScanMode == WIFI_ATTACK_CAMERA_DEAUTH) ||
             (wifi_scan_obj.currentScanMode == BT_SCAN_ANALYZER))
         {
           wifi_scan_obj.StartScan(WIFI_SCAN_OFF);

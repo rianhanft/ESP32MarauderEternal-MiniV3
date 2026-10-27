@@ -288,14 +288,30 @@ void drawList(uint8_t selected) {
   display_obj.tft.print(F("Persistence-ranked  C:exit"));
 }
 
-void drawDetail(uint8_t selected, bool locate) {
+// Locate the locked device by ADDRESS (not list position): the list is
+// re-ranked live, so a fixed row index would keep pointing at whatever device
+// the persistence sort shuffled into it. Returns -1 if the locked device is not
+// currently in the snapshot.
+int findLocked(const Device* snapshot, uint8_t count, const char* lockAddr,
+               DeviceKind lockKind) {
+  if (!lockAddr || !lockAddr[0]) return -1;
+  for (uint8_t i = 0; i < count; i++) {
+    if (snapshot[i].kind == lockKind &&
+        strncmp(snapshot[i].address, lockAddr, sizeof(snapshot[i].address)) == 0)
+      return i;
+  }
+  return -1;
+}
+
+void drawDetail(const char* lockAddr, DeviceKind lockKind, bool locate) {
   Device snapshot[MAX_RESULTS]{};
   const uint8_t count = copyResults(snapshot);
-  if (!count || selected >= count) {
+  const int sel = findLocked(snapshot, count, lockAddr, lockKind);
+  if (sel < 0) {
     drawList(0);
     return;
   }
-  const Device& item = snapshot[selected];
+  const Device& item = snapshot[sel];
   display_obj.tft.fillScreen(TFT_BLACK);
   drawHeader();
   display_obj.tft.setTextColor(TFT_YELLOW, TFT_BLACK);
@@ -383,6 +399,8 @@ void run() {
 
   uint8_t selected = 0;
   uint8_t detailPage = 0;
+  char lockedAddress[18] = {0};   // device the detail/locate view is pinned to
+  DeviceKind lockedKind = BLE_DEVICE;
   uint32_t drawnRevision = UINT32_MAX;
   uint32_t nextChannelHop = millis() + CHANNEL_DWELL_MS;
   uint32_t nextWindow = millis() + PERSISTENCE_WINDOW_MS;
@@ -411,7 +429,10 @@ void run() {
       selected = 0;
     else if (selected >= count)
       selected = count - 1;
-    bool redraw = revision != drawnRevision;
+    // Only the live list reshuffles on new adverts; the detail/locate view is
+    // pinned to one device, so don't repaint it on every advert (that was the
+    // rapid flicker) -- it refreshes on its own timer and on button presses.
+    bool redraw = (detailPage == 0) && (revision != drawnRevision);
     if (detailPage == 0 && u_btn.justPressed() && selected > 0) {
       selected--;
       redraw = true;
@@ -421,11 +442,24 @@ void run() {
       redraw = true;
     }
     if (r_btn.justPressed() && count) {
-      detailPage = detailPage == 0 ? 1 : (detailPage == 1 ? 2 : 1);
+      if (detailPage == 0) {
+        // Entering detail from the list: pin onto the highlighted device by
+        // address so re-ranking can't swap which device we're looking at.
+        Device snap[MAX_RESULTS]{};
+        const uint8_t snapCount = copyResults(snap);
+        if (selected < snapCount) {
+          strlcpy(lockedAddress, snap[selected].address, sizeof(lockedAddress));
+          lockedKind = snap[selected].kind;
+        }
+        detailPage = 1;
+      } else {
+        detailPage = detailPage == 1 ? 2 : 1;  // toggle detail <-> locate
+      }
       redraw = true;
     }
     if (l_btn.justPressed() && detailPage) {
       detailPage = 0;
+      lockedAddress[0] = '\0';
       redraw = true;
     }
     if (static_cast<int32_t>(now - nextDraw) >= 0) {
@@ -434,7 +468,7 @@ void run() {
     }
     if (usable && redraw) {
       if (detailPage)
-        drawDetail(selected, detailPage == 2);
+        drawDetail(lockedAddress, lockedKind, detailPage == 2);
       else
         drawList(selected);
       drawnRevision = revision;
