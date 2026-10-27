@@ -444,13 +444,32 @@ bool EvilPortal::setAP(String essid) {
 void EvilPortal::startAP() {
   const IPAddress AP_IP(172, 0, 0, 1);
 
-  WiFi.mode(WIFI_AP);
-  WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
-  WiFi.softAP(apName);
+  // Bring the softAP up, retrying a few times. After a long/dense AP scan the
+  // internal (DMA) heap can be fragmented, or the previous mode's radio teardown
+  // may not have fully settled, so the first WiFi.softAP() intermittently fails
+  // and the SSID never broadcasts ("sometimes it works, sometimes it doesn't",
+  // worse on the Mini V3 with its smaller internal-heap headroom). A short settle
+  // + retry brings it up reliably. On the healthy path (e.g. the V8) it comes up
+  // on the first attempt and the rest of the loop never runs.
+  bool up = false;
+  for (int attempt = 0; attempt < 4; attempt++) {
+    WiFi.mode(WIFI_AP);
+    WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
+    up = WiFi.softAP(apName);
+    if (up && WiFi.softAPIP() != IPAddress(0, 0, 0, 0))
+      break;
+    // Failed to come up: drop the half-started AP and let the radio settle.
+    WiFi.softAPdisconnect(true);
+    delay(200);
+  }
 
   #ifndef MARAUDER_V8
     Serial.print(F("ap ip address: "));
     Serial.println(WiFi.softAPIP());
+  #endif
+  #ifdef HAS_SCREEN
+    if (!up || WiFi.softAPIP() == IPAddress(0, 0, 0, 0))
+      this->sendToDisplay(F("SoftAP failed to start -- stopscan and retry"));
   #endif
 
   // Start the native HTTP server fresh on the just-created AP. (Done every

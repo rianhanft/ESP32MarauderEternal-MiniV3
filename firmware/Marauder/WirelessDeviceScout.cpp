@@ -18,6 +18,8 @@
 
 #include <NimBLEDevice.h>
 #include <WiFi.h>
+#include <esp_bt.h>
+#include <esp_coexist.h>
 #include <esp_heap_caps.h>
 #include <esp_wifi.h>
 
@@ -492,6 +494,20 @@ void run() {
   scan->setScanCallbacks(nullptr);
   scan->clearResults();
   NimBLEDevice::deinit(true);
+
+  // Shared-radio safety net (mirrors WiFiScan::shutdownBLE). NimBLEDevice::deinit
+  // only disables/deinits the BT controller if its host-stop succeeds; if that
+  // bails the controller stays ENABLED and keeps the 2.4 GHz radio. A WiFi-only
+  // feature started afterwards -- notably Evil Portal's softAP -- then cannot get
+  // on air: its SSID never broadcasts and the phone cannot join. Force the
+  // controller down if it is still up, and clear any BT coexistence bias so WiFi
+  // gets the radio back. No-op on the healthy path.
+  if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED)
+    esp_bt_controller_disable();
+  if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED)
+    esp_bt_controller_deinit();
+  esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+
   esp_wifi_set_promiscuous(false);
   esp_wifi_set_promiscuous_rx_cb(nullptr);
   WiFi.disconnect(true);
