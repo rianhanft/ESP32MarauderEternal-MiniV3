@@ -361,7 +361,7 @@ void Display::drawBootSplash() {
     tft.setTextSize(1);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.drawCentreString("esp32 MarauderBox", width / 2, 10, 1);
-    tft.drawCentreString("1.1.3", width / 2, 27, 1);
+    tft.drawCentreString("1.1.4", width / 2, 27, 1);
     tft.drawCentreString("POOM", width / 2, 44, 1);
     tft.display(true);
     return;
@@ -417,7 +417,7 @@ void Display::drawBootSplash() {
                     radius > 1 ? radius - 1 : 1, TFT_WHITE);
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawCentreString("1.1.3", width / 2, layout.version_y, 1);
+  tft.drawCentreString("1.1.4", width / 2, layout.version_y, 1);
   tft.setTextColor(TFT_GREEN, TFT_BLACK);
   tft.drawCentreString("Initializing...", width / 2, layout.status_y, 1);
   tft.setTextSize(1);
