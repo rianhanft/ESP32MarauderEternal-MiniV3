@@ -7664,21 +7664,32 @@ void WiFiScan::getMAC(uint8_t* mac, const uint8_t* data, uint16_t offset) {
 }
 
 int WiFiScan::checkMatchAP(char addr[], bool update_ap) {
-  for (int i = 0; i < access_points->size(); i++) {
+  // Parse the incoming BSSID once instead of per-node.
+  uint8_t want[6];
+  for (int x = 0; x < 6; x++)
+    want[x] = (uint8_t)strtol(&addr[x * 3], NULL, 16);
+
+  const int n = access_points->size();
+  for (int i = 0; i < n; i++) {
+    // Reference access (operator[]), NOT get(): get() returns an AccessPoint by
+    // value, copying its two Strings (essid, man) per node. In a dense AP
+    // environment this ran on every received beacon over a list of hundreds of
+    // APs, so the WiFi RX callback spent all its time copying Strings and
+    // starved the channel-hop timer -- the sweep appeared "stuck" on the
+    // busiest (5 GHz) channels before finally advancing. Comparing by reference
+    // touches only the 6 BSSID bytes and copies nothing.
+    AccessPoint& ap = (*access_points)[i];
+
     bool mac_match = true;
-
-    AccessPoint access_point = access_points->get(i);
-
     for (int x = 0; x < 6; x++) {
-      if ((uint8_t)strtol(&addr[x * 3], NULL, 16) != access_point.bssid[x]) {
+      if (want[x] != ap.bssid[x]) {
         mac_match = false;
         break;
       }
     }
 
     if ((mac_match) && (update_ap)) {
-      access_point.packets += 1;
-      access_points->set(i, access_point);
+      ap.packets += 1;  // in place -- no set()/copy-back
       return i;
     }
   }
@@ -7781,12 +7792,11 @@ void WiFiScan::apSnifferCallbackFull(void* buf, wifi_promiscuous_pkt_type_t type
 
       int index = wifi_scan_obj.checkMatchAP(addr);
       if (index >= 0) {
-        AccessPoint access_point = access_points->get(index);
-        String man = wifi_scan_obj.extractManufacturer(snifferPacket->payload, len);
+        // Reference, not get()/set(): avoids copying the AccessPoint's Strings.
+        AccessPoint& access_point = (*access_points)[index];
         if (!access_point.wps) {
         //new_ap.wps = true;
-          access_point.man = man;
-          access_points->set(index, access_point);
+          access_point.man = wifi_scan_obj.extractManufacturer(snifferPacket->payload, len);
         }
       }
       //}
@@ -7816,11 +7826,13 @@ void WiFiScan::apSnifferCallbackFull(void* buf, wifi_promiscuous_pkt_type_t type
       int in_list = wifi_scan_obj.checkMatchAP(addr);
 
       if (in_list >= 0) {
-        AccessPoint access_point = access_points->get(in_list);
+        // Reference, not get()/set(): the on-beacon refresh of an existing AP
+        // is the hottest path in a dense environment. Copying the AccessPoint
+        // (two Strings) out and back per beacon is what starved the hop timer.
+        AccessPoint& access_point = (*access_points)[in_list];
         access_point.rssi = snifferPacket->rx_ctrl.rssi;
         access_point.channel = snifferPacket->rx_ctrl.channel;
         access_point.last_seen_ms = millis();
-        access_points->set(in_list, access_point);
         recon_obj.queueRepeat('A', &snifferPacket->payload[10],
                               snifferPacket->rx_ctrl.rssi,
                               snifferPacket->rx_ctrl.channel);
