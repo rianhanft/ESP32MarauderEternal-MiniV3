@@ -3180,6 +3180,10 @@ void WiFiScan::startWiFiAttacks(uint8_t scan_mode, uint16_t color, const char* t
   }
         
   packets_sent = 0;
+  if (scan_mode == WIFI_ATTACK_DEAUTH) {
+    this->deauth_view = 0;
+    this->deauth_next_ui = 0;
+  }
   esp_wifi_init(&cfg);
   #ifdef HAS_IDF_3
     esp_wifi_set_country(&country);
@@ -11285,6 +11289,67 @@ void WiFiScan::drawCameraDeauthStatus() {
 }
 // ===== end Camera Deauther ===================================================
 
+// Eternal-style live status for broadcast deauth. Cycles through the selected
+// APs so each is shown in turn: red header, SSID, BSSID (cyan), channel/RSSI,
+// and the running packet count. Display only -- does not touch the TX logic.
+void WiFiScan::drawDeauthStatus() {
+  #ifdef HAS_SCREEN
+    // Single pass: count selected APs and capture the one at deauth_view.
+    int selectedCount = 0;
+    String ssid;
+    char bssidStr[18] = {0};
+    int channel = 0;
+    int rssi = 0;
+    for (int i = 0; i < access_points->size(); i++) {
+      AccessPoint ap = access_points->get(i);
+      if (!ap.selected) continue;
+      if (selectedCount == this->deauth_view) {
+        ssid = ap.essid;
+        snprintf(bssidStr, sizeof(bssidStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 ap.bssid[0], ap.bssid[1], ap.bssid[2], ap.bssid[3], ap.bssid[4], ap.bssid[5]);
+        channel = ap.channel;
+        rssi = ap.rssi;
+      }
+      selectedCount++;
+    }
+
+    display_obj.tft.fillRect(0, 16, TFT_WIDTH, 16, TFT_RED);
+    display_obj.tft.fillRect(0, 32, TFT_WIDTH, TFT_HEIGHT - 32, TFT_BLACK);
+    display_obj.tft.setTextDatum(TC_DATUM);
+    display_obj.tft.setTextSize(1);
+    display_obj.tft.setTextColor(TFT_WHITE, TFT_RED);
+    display_obj.tft.drawString("BROADCAST DEAUTH", TFT_WIDTH / 2, 20, 1);
+    display_obj.tft.setTextDatum(TL_DATUM);
+
+    if (selectedCount == 0) {
+      display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      display_obj.tft.drawString("No APs selected", 2, 40, 1);
+      display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+      display_obj.tft.drawString("Touch:stop", 2, TFT_HEIGHT - 12, 1);
+      return;
+    }
+
+    // Truncate SSID to keep it on one line.
+    if (ssid.length() > 26) ssid = ssid.substring(0, 25) + "~";
+
+    display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    display_obj.tft.drawString(String("AP ") + (this->deauth_view + 1) + "/" + selectedCount, 2, 36, 1);
+    display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    display_obj.tft.drawString(ssid.length() ? ssid : String("(hidden)"), 2, 50, 1);
+    display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    display_obj.tft.drawString(String(bssidStr), 2, 64, 1);
+    display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    display_obj.tft.drawString(String("CH ") + channel + "   RSSI " + rssi, 2, 78, 1);
+    display_obj.tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    display_obj.tft.drawString(String("Packets ") + packets_sent, 2, 92, 1);
+    display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    display_obj.tft.drawString("Touch:stop", 2, TFT_HEIGHT - 12, 1);
+
+    // Advance to the next selected AP for the next refresh.
+    this->deauth_view = (this->deauth_view + 1) % selectedCount;
+  #endif
+}
+
 void WiFiScan::changeChannel(int chan) {
   if (chan != -1)
     this->set_channel = chan;
@@ -13407,6 +13472,11 @@ void WiFiScan::main(uint32_t currentTime)
           this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes);
         }
       }
+    }
+    // Eternal-style live status (display only; TX logic above is unchanged).
+    if (static_cast<int32_t>(millis() - this->deauth_next_ui) >= 0) {
+      this->deauth_next_ui = millis() + 800;
+      this->drawDeauthStatus();
     }
   }
 

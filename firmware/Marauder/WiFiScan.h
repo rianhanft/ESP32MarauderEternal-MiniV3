@@ -414,6 +414,9 @@ class WiFiScan
     uint8_t camera_deauth_cursor = 0;
     uint8_t camera_deauth_view = 0;
     uint32_t camera_deauth_next_ui = 0;
+    // Eternal-style live deauth status (broadcast deauth), cycles selected APs.
+    uint8_t deauth_view = 0;
+    uint32_t deauth_next_ui = 0;
     uint32_t remote_id_last_render_ms = 0;
     uint8_t remote_id_schedule_step = 0;
     uint8_t remote_id_beacon_channel_index = 0;
@@ -864,6 +867,8 @@ class WiFiScan
     // Ported from Marauder Eternal: Camera Deauther (internal helpers).
     void sendCameraDeauthFrame(WiFiCameraDetector::DeauthLink& link);
     void drawCameraDeauthStatus();
+    // Eternal-style live broadcast-deauth status screen.
+    void drawDeauthStatus();
     void sendEapolBagMsg1(uint8_t bssid[6], int channel, uint8_t mac[6], uint8_t sec = WIFI_SECURITY_WPA2);
     void sendAssociationSleep(const char* ESSID, uint8_t bssid[6], int channel, uint8_t mac[6]);
     void broadcastRandomSSID(uint32_t currentTime);
