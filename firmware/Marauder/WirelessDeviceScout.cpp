@@ -60,23 +60,31 @@ struct Device {
 // .bss, so this feature does not permanently hold the scarce internal SRAM that
 // esp_wifi_init() needs after a Bluetooth session.
 Device* results = nullptr;
+// Shared scratch for a sorted snapshot. Lives in PSRAM, NOT on the stack: a
+// Device[MAX_RESULTS] is ~3.6 KB, and putting one in run()'s frame alongside the
+// 3.6 KB that drawList()/drawDetail() each use overflowed the loop task's 8 KB
+// stack and crashed Device Scout. All snapshot consumers are sequential (never
+// nested), so one shared buffer is safe.
+Device* snapshotBuf = nullptr;
 uint8_t resultCount = 0;
 volatile uint32_t resultRevision = 0;
 volatile uint32_t persistenceWindow = 1;
 volatile uint8_t scanChannel = 1;
 portMUX_TYPE resultMux = portMUX_INITIALIZER_UNLOCKED;
 
-// Allocate the result store in PSRAM on first use (idempotent). Device is a POD
-// zeroed on insert, so a plain zero-init is correct. Must be called before any
+// Allocate a store in PSRAM on first use (idempotent). Must be called before any
 // access and outside any portENTER_CRITICAL section (it allocates).
-bool ensureBuffers() {
-  if (results) return true;
+Device* allocDeviceBuffer() {
   void* mem = heap_caps_malloc(sizeof(Device) * MAX_RESULTS, MALLOC_CAP_SPIRAM);
   if (!mem) mem = heap_caps_malloc(sizeof(Device) * MAX_RESULTS, MALLOC_CAP_8BIT);
-  if (!mem) return false;
-  memset(mem, 0, sizeof(Device) * MAX_RESULTS);
-  results = static_cast<Device*>(mem);
-  return true;
+  if (mem) memset(mem, 0, sizeof(Device) * MAX_RESULTS);
+  return static_cast<Device*>(mem);
+}
+
+bool ensureBuffers() {
+  if (!results) results = allocDeviceBuffer();
+  if (!snapshotBuf) snapshotBuf = allocDeviceBuffer();
+  return results && snapshotBuf;
 }
 
 bool buttonDown(Switches& button) {
@@ -259,7 +267,8 @@ void drawHeader() {
 }
 
 void drawList(uint8_t selected) {
-  Device snapshot[MAX_RESULTS]{};
+  if (!snapshotBuf) return;
+  Device* snapshot = snapshotBuf;   // shared PSRAM scratch, not the stack
   const uint8_t count = copyResults(snapshot);
   display_obj.tft.fillScreen(TFT_BLACK);
   drawHeader();
@@ -304,7 +313,8 @@ int findLocked(const Device* snapshot, uint8_t count, const char* lockAddr,
 }
 
 void drawDetail(const char* lockAddr, DeviceKind lockKind, bool locate) {
-  Device snapshot[MAX_RESULTS]{};
+  if (!snapshotBuf) return;
+  Device* snapshot = snapshotBuf;   // shared PSRAM scratch, not the stack
   const uint8_t count = copyResults(snapshot);
   const int sel = findLocked(snapshot, count, lockAddr, lockKind);
   if (sel < 0) {
@@ -445,11 +455,12 @@ void run() {
       if (detailPage == 0) {
         // Entering detail from the list: pin onto the highlighted device by
         // address so re-ranking can't swap which device we're looking at.
-        Device snap[MAX_RESULTS]{};
-        const uint8_t snapCount = copyResults(snap);
-        if (selected < snapCount) {
-          strlcpy(lockedAddress, snap[selected].address, sizeof(lockedAddress));
-          lockedKind = snap[selected].kind;
+        // Use the shared PSRAM snapshot buffer -- a stack Device[MAX_RESULTS]
+        // here is what overflowed the task stack and crashed the feature.
+        const uint8_t snapCount = snapshotBuf ? copyResults(snapshotBuf) : 0;
+        if (snapshotBuf && selected < snapCount) {
+          strlcpy(lockedAddress, snapshotBuf[selected].address, sizeof(lockedAddress));
+          lockedKind = snapshotBuf[selected].kind;
         }
         detailPage = 1;
       } else {
