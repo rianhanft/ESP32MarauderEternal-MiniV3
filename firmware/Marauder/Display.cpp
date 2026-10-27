@@ -381,7 +381,7 @@ void Display::drawBootSplash() {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawCentreString("esp32 MarauderBox", width / 2, layout.title_y, 1);
 
-  // "MarauderBox" frame around the emblem (rounded double border, theme blue).
+  // "MarauderBox" frame around the emblem (rounded double border, white).
   const int16_t pad = 7;
   int16_t bx = layout.logo_x - pad;
   int16_t by = layout.logo_y - pad;
@@ -393,7 +393,7 @@ void Display::drawBootSplash() {
   if (bx + bw > width - 1) bw = width - 1 - bx;
   if (by + bh > height - 1) bh = height - 1 - by;
 
-  // Blue cat-in-a-box emblem, scaled to fit inside the box while preserving its
+  // White cat-in-a-box emblem, scaled to fit inside the box while preserving its
   // aspect ratio, and centred.
   {
     const int16_t avail_w = bw - 14;
@@ -408,13 +408,13 @@ void Display::drawBootSplash() {
     }
     const int16_t dx = bx + (bw - dw) / 2;
     const int16_t dy = by + (bh - dh) / 2;
-    drawCatEmblem(tft, dx, dy, dw, dh, TFT_CYAN);
+    drawCatEmblem(tft, dx, dy, dw, dh, TFT_WHITE);
   }
 
   const int16_t radius = 6;
-  tft.drawRoundRect(bx, by, bw, bh, radius, TFT_CYAN);
+  tft.drawRoundRect(bx, by, bw, bh, radius, TFT_WHITE);
   tft.drawRoundRect(bx + 2, by + 2, bw - 4, bh - 4,
-                    radius > 1 ? radius - 1 : 1, TFT_CYAN);
+                    radius > 1 ? radius - 1 : 1, TFT_WHITE);
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawCentreString("1.1.3", width / 2, layout.version_y, 1);
