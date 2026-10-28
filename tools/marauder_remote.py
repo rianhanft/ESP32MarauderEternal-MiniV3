@@ -116,165 +116,158 @@ class SerialBridge:
         return text
 
 
-# --- Marauder-style menu tree -------------------------------------------------
-# Node keys:  t=title  c=color  m=submenu(list)  x=command  p=prompt(arg -> {})
-# Colors map to CSS classes below. Commands are the real MarauderBox CLI.
+# --- Marauder-style menu tree (mirrors the device menu, exact same order) -----
+# Node keys: t=title c=color ic=icon m=submenu x=command p=prompt(arg -> {})
+#            pick="ap"|"ssid"|"html"   dev=True (device-screen only, no CLI)
 
 MENU = [
-  {"t": "WiFi", "c": "cy", "m": [
-    {"t": "Sniffers", "c": "yel", "m": [
-      {"t": "Scan APs + Stations", "c": "grn", "x": "scanall"},
-      {"t": "Sniff Beacons", "c": "cy", "x": "sniffbeacon"},
-      {"t": "Sniff Probes", "c": "cy", "x": "sniffprobe"},
-      {"t": "Sniff Deauth", "c": "red", "x": "sniffdeauth"},
-      {"t": "Sniff PMKID", "c": "grn", "x": "sniffpmkid"},
-      {"t": "Sniff PMKID + Deauth", "c": "grn", "x": "sniffpmkid -d"},
-      {"t": "Sniff Pwnagotchi", "c": "mag", "x": "sniffpwn"},
-      {"t": "Sniff Pineapple", "c": "org", "x": "sniffpinescan"},
-      {"t": "Sniff MultiSSID", "c": "cy", "x": "sniffmultissid"},
-      {"t": "Sniff SAE", "c": "cy", "x": "sniffsae"},
+  {"t": "Recon", "c": "mag", "ic": "\U0001F4E1", "m": [
+    {"t": "Start WiFi Recon", "c": "grn", "x": "recon wifi"},
+    {"t": "Start BLE Recon", "c": "cy", "x": "recon ble"},
+    {"t": "Recon Status", "c": "grn", "x": "recon status"},
+    {"t": "Stop Recon", "c": "red", "x": "recon stop"},
+  ]},
+  {"t": "WiFi", "c": "grn", "ic": "\U0001F4F6", "m": [
+    {"t": "Sniffers", "c": "yel", "ic": "\U0001F3A7", "m": [
+      {"t": "Probe Request Sniff", "c": "cy", "x": "sniffprobe"},
+      {"t": "Beacon Sniff", "c": "mag", "x": "sniffbeacon"},
+      {"t": "Deauth Sniff", "c": "red", "x": "sniffdeauth"},
+      {"t": "Packet Count", "c": "org", "x": "packetcount"},
+      {"t": "EAPOL/PMKID Scan", "c": "pur", "x": "sniffpmkid"},
+      {"t": "Packet Monitor", "c": "blu", "dev": True},
+      {"t": "Channel Analyzer", "c": "cy", "dev": True},
+      {"t": "Channel Summary", "c": "org", "dev": True},
       {"t": "Raw Capture", "c": "wht", "x": "sniffraw"},
-      {"t": "Packet Count", "c": "grn", "x": "packetcount"},
-      {"t": "Wardrive", "c": "cy", "x": "wardrive"},
-      {"t": "Wardrive POI tag", "c": "org", "x": "wardrivepoi"},
-      {"t": "MAC Tracker", "c": "mag", "x": "mactrack"},
+      {"t": "Detect Pwnagotchi", "c": "red", "x": "sniffpwn"},
+      {"t": "Detect Pineapple", "c": "yel", "x": "sniffpinescan"},
+      {"t": "Detect MultiSSID", "c": "org", "x": "sniffmultissid"},
+      {"t": "Scan AP/STA", "c": "lime", "x": "scanall"},
+      {"t": "MAC Monitor", "c": "mag", "x": "mactrack"},
+      {"t": "SAE Commit", "c": "lime", "x": "sniffsae"},
+      {"t": "Wardrive", "c": "grn", "x": "wardrive"},
     ]},
-    {"t": "Attacks", "c": "red", "m": [
-      {"t": "Deauth", "c": "red", "x": "attack -t deauth"},
-      {"t": "Deauth (targeted)", "c": "red", "x": "attack -t deauth -c"},
-      {"t": "Beacon: Rickroll", "c": "mag", "x": "attack -t beacon -r"},
-      {"t": "Beacon: SSID List", "c": "mag", "x": "attack -t beacon -l"},
-      {"t": "Beacon: Random", "c": "mag", "x": "attack -t beacon -a"},
-      {"t": "Probe Flood", "c": "org", "x": "attack -t probe"},
-      {"t": "Rick Roll", "c": "mag", "x": "attack -t rickroll"},
-      {"t": "Bad Msg", "c": "red", "x": "attack -t badmsg"},
-      {"t": "Bad Msg (targeted)", "c": "red", "x": "attack -t badmsg -c"},
-      {"t": "Sleep / Assoc", "c": "org", "x": "attack -t sleep"},
-      {"t": "SAE Flood", "c": "red", "x": "attack -t sae"},
-      {"t": "CSA", "c": "red", "x": "attack -t csa"},
-      {"t": "Quiet", "c": "red", "x": "attack -t quiet"},
-      {"t": "Karma (index)", "c": "red", "x": "karma -p {}", "p": "SSID index"},
-      {"t": "Evil Portal (start)", "c": "org", "x": "evilportal -c start"},
-    ]},
-    {"t": "Select APs / SSIDs", "c": "grn", "pick": "ap"},
-    {"t": "Target List", "c": "blu", "m": [
-      {"t": "Pick APs by SSID", "c": "grn", "pick": "ap"},
-      {"t": "List APs", "c": "cy", "x": "list -a"},
-      {"t": "List Stations", "c": "cy", "x": "list -s"},
-      {"t": "List SSIDs", "c": "cy", "x": "list -c"},
-      {"t": "Info on AP (index)", "c": "cy", "x": "info -a {}", "p": "AP index"},
-      {"t": "Select AP (index)", "c": "grn", "x": "select -a {}", "p": "AP index"},
-      {"t": "Select ALL APs", "c": "grn", "x": "select -a all"},
-      {"t": "Select Station (index)", "c": "grn", "x": "select -s {}", "p": "Station index"},
-      {"t": "Select ALL Stations", "c": "grn", "x": "select -s all"},
-      {"t": "Select SSID (index)", "c": "grn", "x": "select -c {}", "p": "SSID index"},
-      {"t": "Select ALL SSIDs", "c": "grn", "x": "select -c all"},
-      {"t": "Clear APs", "c": "red", "x": "clearlist -a"},
-      {"t": "Clear Stations", "c": "red", "x": "clearlist -s"},
-      {"t": "Clear SSIDs", "c": "red", "x": "clearlist -c"},
-      {"t": "Save APs", "c": "blu", "x": "save -a"},
-      {"t": "Save SSIDs", "c": "blu", "x": "save -s"},
-      {"t": "Load APs", "c": "blu", "x": "load -a"},
-      {"t": "Load SSIDs", "c": "blu", "x": "load -s"},
-    ]},
-    {"t": "SSID List", "c": "blu", "m": [
-      {"t": "Add random SSIDs (count)", "c": "grn", "x": "ssid -a -g {}", "p": "how many"},
-      {"t": "Add named SSID", "c": "grn", "x": "ssid -a -n {}", "p": "SSID name"},
-      {"t": "Remove SSID (index)", "c": "red", "x": "ssid -r {}", "p": "SSID index"},
-    ]},
-    {"t": "Recon (passive)", "c": "grn", "m": [
-      {"t": "Recon WiFi", "c": "cy", "x": "recon wifi"},
-      {"t": "Recon BLE", "c": "cy", "x": "recon ble"},
-      {"t": "Recon Status", "c": "grn", "x": "recon status"},
-      {"t": "Recon Stop", "c": "red", "x": "recon stop"},
-    ]},
-    {"t": "Network (join first)", "c": "blu", "m": [
-      {"t": "Join AP (index)", "c": "grn", "x": "join -a {}", "p": "AP index"},
-      {"t": "Join saved network", "c": "grn", "x": "join -s"},
-      {"t": "Ping Scan", "c": "cy", "x": "pingscan"},
+    {"t": "Scanners", "c": "org", "ic": "\U0001F50E", "m": [
+      {"t": "Ping Scan", "c": "grn", "x": "pingscan"},
       {"t": "ARP Scan", "c": "cy", "x": "arpscan"},
-      {"t": "Port Scan (IP index)", "c": "cy", "x": "portscan -a -t {}", "p": "IP index"},
-      {"t": "Scan HTTP", "c": "cy", "x": "portscan -s http"},
-      {"t": "Scan HTTPS", "c": "cy", "x": "portscan -s https"},
-      {"t": "Scan SSH", "c": "cy", "x": "portscan -s ssh"},
-      {"t": "Scan Telnet", "c": "cy", "x": "portscan -s telnet"},
-      {"t": "Scan DNS", "c": "cy", "x": "portscan -s dns"},
-      {"t": "Scan SMTP", "c": "cy", "x": "portscan -s smtp"},
-      {"t": "Scan RDP", "c": "cy", "x": "portscan -s rdp"},
-      {"t": "Upload Wardrive -> WiGLE", "c": "grn", "x": "upload -d wigle"},
+      {"t": "Port Scan All (IP idx)", "c": "mag", "x": "portscan -a -t {}", "p": "IP index"},
+      {"t": "SSH Scan", "c": "org", "x": "portscan -s ssh"},
+      {"t": "Telnet Scan", "c": "red", "x": "portscan -s telnet"},
+      {"t": "SMTP Scan", "c": "wht", "x": "portscan -s smtp"},
+      {"t": "DNS Scan", "c": "lime", "x": "portscan -s dns"},
+      {"t": "HTTP Scan", "c": "sky", "x": "portscan -s http"},
+      {"t": "HTTPS Scan", "c": "yel", "x": "portscan -s https"},
+      {"t": "RDP Scan", "c": "pur", "x": "portscan -s rdp"},
     ]},
-    {"t": "CSI Motion", "c": "mag", "m": [
-      {"t": "Start (AP index)", "c": "grn", "x": "csimotion start {}", "p": "AP index"},
-      {"t": "Recalibrate", "c": "cy", "x": "csimotion recalibrate"},
-      {"t": "Status", "c": "cy", "x": "csimotion status"},
+    {"t": "Attacks", "c": "red", "ic": "\U0001F4A5", "m": [
+      {"t": "Beacon Spam List", "c": "red", "x": "attack -t beacon -l"},
+      {"t": "Beacon Spam Random", "c": "org", "x": "attack -t beacon -a"},
+      {"t": "Funny SSID Beacon", "c": "cy", "x": "attack -t funny"},
+      {"t": "Rick Roll Beacon", "c": "yel", "x": "attack -t rickroll"},
+      {"t": "Probe Req Flood", "c": "red", "x": "attack -t probe"},
+      {"t": "Evil Portal (start)", "c": "org", "x": "evilportal -c start"},
+      {"t": "Deauth Flood", "c": "red", "x": "attack -t deauth"},
+      {"t": "AP Clone Spam", "c": "mag", "dev": True},
+      {"t": "Deauth Targeted", "c": "red", "x": "attack -t deauth"},
+      {"t": "Karma (SSID idx)", "c": "org", "x": "karma -p {}", "p": "probe SSID index"},
+      {"t": "Bad Msg", "c": "red", "x": "attack -t badmsg"},
+      {"t": "Bad Msg Targeted", "c": "yel", "x": "attack -t badmsg -c"},
+      {"t": "Assoc Sleep", "c": "red", "x": "attack -t sleep"},
+      {"t": "Assoc Sleep Targ", "c": "mag", "x": "attack -t sleep -c"},
+      {"t": "SAE Commit Flood", "c": "lime", "x": "attack -t sae"},
+      {"t": "Channel Switch", "c": "org", "x": "attack -t csa"},
+      {"t": "Quiet Time", "c": "red", "x": "attack -t quiet"},
+    ]},
+    {"t": "General", "c": "pur", "ic": "\U0001F9F0", "m": [
+      {"t": "Select EP HTML File", "c": "org", "pick": "html"},
+      {"t": "Select APs", "c": "grn", "pick": "ap"},
+      {"t": "Select by SSID", "c": "grn", "pick": "ssid"},
+      {"t": "View AP Info (idx)", "c": "cy", "x": "info -a {}", "p": "AP index"},
+      {"t": "Select Stations (idx)", "c": "grn", "x": "select -s {}", "p": "Station index"},
+      {"t": "Join WiFi (AP idx)", "c": "grn", "x": "join -a {}", "p": "AP index"},
+      {"t": "Join Saved WiFi", "c": "grn", "x": "join -s"},
+      {"t": "Set MACs", "c": "wht", "dev": True},
+      {"t": "Shutdown WiFi", "c": "red", "x": "stopscan"},
+      {"t": "Upload Wardrive Logs", "c": "grn", "x": "upload -d wigle"},
     ]},
   ]},
-  {"t": "Bluetooth", "c": "blu", "m": [
-    {"t": "Sniffers", "c": "yel", "m": [
-      {"t": "BLE Scan (all)", "c": "cy", "x": "sniffbt"},
-      {"t": "Sniff AirTags", "c": "cy", "x": "sniffbt -t airtag"},
-      {"t": "Sniff iBeacons", "c": "cy", "x": "sniffbt -t ibeacon"},
-      {"t": "Sniff Flipper", "c": "org", "x": "sniffbt -t flipper"},
-      {"t": "Sniff Flock (ALPR)", "c": "red", "x": "sniffbt -t flock"},
-      {"t": "Sniff Meta / Rayban", "c": "mag", "x": "sniffbt -t meta"},
-      {"t": "Sniff Skimmers", "c": "red", "x": "sniffskim"},
-      {"t": "Find My (index)", "c": "cy", "x": "findmy -t {}", "p": "device index"},
+  {"t": "Bluetooth", "c": "cy", "ic": "\U0001F535", "m": [
+    {"t": "Sniffers", "c": "yel", "ic": "\U0001F3A7", "m": [
+      {"t": "Bluetooth Sniff", "c": "grn", "x": "sniffbt"},
+      {"t": "Flipper Sniff", "c": "org", "x": "sniffbt -t flipper"},
+      {"t": "FindMy Sniff", "c": "wht", "x": "sniffbt -t airtag"},
+      {"t": "iBeacon Sniff", "c": "cy", "x": "sniffbt -t ibeacon"},
+      {"t": "FindMy Monitor", "c": "wht", "x": "sniffbt -t airtag"},
+      {"t": "Detect Card Skimmers", "c": "mag", "x": "sniffskim"},
+      {"t": "Bluetooth Analyzer", "c": "cy", "dev": True},
+      {"t": "Flock Sniff", "c": "org", "x": "sniffbt -t flock"},
+      {"t": "Meta Detect", "c": "wht", "x": "sniffbt -t meta"},
     ]},
-    {"t": "Attacks", "c": "red", "m": [
-      {"t": "BLE Spam: Sour Apple", "c": "red", "x": "blespam -t sourapple"},
-      {"t": "BLE Spam: Apple Juice", "c": "red", "x": "blespam -t applejuice"},
-      {"t": "BLE Spam: Google", "c": "red", "x": "blespam -t google"},
-      {"t": "BLE Spam: Samsung", "c": "red", "x": "blespam -t samsung"},
-      {"t": "BLE Spam: Windows", "c": "red", "x": "blespam -t windows"},
-      {"t": "BLE Spam: Flipper", "c": "red", "x": "blespam -t flipper"},
-      {"t": "BLE Spam: ALL", "c": "red", "x": "blespam -t all"},
-      {"t": "Spoof AirTag (index)", "c": "org", "x": "spoofat -t {}", "p": "AirTag index"},
+    {"t": "Bluetooth Attacks", "c": "red", "ic": "\U0001F4A5", "m": [
+      {"t": "Sour Apple", "c": "red", "x": "blespam -t sourapple"},
+      {"t": "Apple Juice", "c": "red", "x": "blespam -t applejuice"},
+      {"t": "Swiftpair Spam", "c": "red", "x": "blespam -t windows"},
+      {"t": "Samsung BLE Spam", "c": "red", "x": "blespam -t samsung"},
+      {"t": "Google BLE Spam", "c": "red", "x": "blespam -t google"},
+      {"t": "Flipper BLE Spam", "c": "red", "x": "blespam -t flipper"},
+      {"t": "BLE Spam All", "c": "red", "x": "blespam -t all"},
+      {"t": "Spoof Airtag (idx)", "c": "org", "x": "spoofat -t {}", "p": "device index"},
+      {"t": "FindMy Sound (idx)", "c": "cy", "x": "findmy -t {}", "p": "device index"},
     ]},
   ]},
-  {"t": "Remote ID (Drone)", "c": "org", "m": [
-    {"t": "Scan", "c": "grn", "x": "remoteid scan"},
-    {"t": "List", "c": "cy", "x": "remoteid list"},
-    {"t": "Track (index)", "c": "mag", "x": "remoteid track {}", "p": "drone index"},
-    {"t": "Clear", "c": "red", "x": "remoteid clear"},
+  {"t": "GPS", "c": "red", "ic": "\U0001F4CD", "m": [
+    {"t": "GPS Data", "c": "red", "x": "gpsdata"},
+    {"t": "NMEA Stream", "c": "org", "x": "nmea"},
+    {"t": "GPS Tracker Start", "c": "grn", "x": "gpstracker -c start"},
+    {"t": "GPS Tracker Stop", "c": "red", "x": "gpstracker -c stop"},
+    {"t": "GPS POI Start", "c": "cy", "x": "gpspoi -s"},
+    {"t": "GPS POI Mark", "c": "cy", "x": "gpspoi -m"},
+    {"t": "GPS POI End", "c": "red", "x": "gpspoi -e"},
   ]},
-  {"t": "GPS", "c": "red", "m": [
-    {"t": "GPS Data", "c": "cy", "x": "gpsdata"},
-    {"t": "NMEA Stream", "c": "cy", "x": "nmea"},
-    {"t": "Fix Status", "c": "cy", "x": "gps -g fix"},
-    {"t": "Satellites", "c": "cy", "x": "gps -g sat"},
-    {"t": "Latitude", "c": "cy", "x": "gps -g lat"},
-    {"t": "Longitude", "c": "cy", "x": "gps -g lon"},
-    {"t": "Altitude", "c": "cy", "x": "gps -g alt"},
-    {"t": "POI: Start log", "c": "grn", "x": "gpspoi -s"},
-    {"t": "POI: Mark point", "c": "grn", "x": "gpspoi -m"},
-    {"t": "POI: End log", "c": "red", "x": "gpspoi -e"},
-    {"t": "Tracker: Start", "c": "grn", "x": "gpstracker -c start"},
-    {"t": "Tracker: Stop", "c": "red", "x": "gpstracker -c stop"},
-    {"t": "Geofence: List", "c": "cy", "x": "geofence list"},
+  {"t": "NyanBox", "c": "mag", "ic": "\U0001F431", "m": [
+    {"t": "Sniffers", "c": "yel", "ic": "\U0001F3A7", "m": [
+      {"t": "Device Scout", "c": "grn", "dev": True},
+      {"t": "Jam Detector", "c": "red", "dev": True},
+      {"t": "Camera Detect", "c": "cy", "dev": True},
+      {"t": "Drone Remote ID Scan", "c": "org", "x": "remoteid scan"},
+      {"t": "Drone Remote ID List", "c": "cy", "x": "remoteid list"},
+      {"t": "Drone Track (idx)", "c": "mag", "x": "remoteid track {}", "p": "drone index"},
+      {"t": "Drone Remote ID Clear", "c": "red", "x": "remoteid clear"},
+    ]},
+    {"t": "Attacks", "c": "red", "ic": "\U0001F4A5", "m": [
+      {"t": "Camera Deauther", "c": "red", "dev": True},
+      {"t": "Drone Spoof", "c": "red", "dev": True},
+      {"t": "Drone Spoof (SD)", "c": "red", "dev": True},
+    ]},
+    {"t": "BLE Detectors", "c": "cy", "ic": "\U0001F535", "m": [
+      {"t": "Meshtastic Sniff", "c": "grn", "dev": True},
+      {"t": "MeshCore Sniff", "c": "cy", "dev": True},
+      {"t": "SmartTag Sniff", "c": "yel", "dev": True},
+      {"t": "Tile Sniff", "c": "org", "dev": True},
+      {"t": "Axon Sniff", "c": "red", "dev": True},
+      {"t": "NyanBOX Sniff", "c": "mag", "dev": True},
+    ]},
   ]},
-  {"t": "Device", "c": "blu", "m": [
-    {"t": "Channel: 1", "c": "cy", "x": "channel -s 1"},
-    {"t": "Channel: 6", "c": "cy", "x": "channel -s 6"},
-    {"t": "Channel: 11", "c": "cy", "x": "channel -s 11"},
-    {"t": "Channel: set...", "c": "cy", "x": "channel -s {}", "p": "channel #"},
-    {"t": "Channel: show", "c": "cy", "x": "channel"},
-    {"t": "Brightness: Max", "c": "yel", "x": "brightness -s 9"},
-    {"t": "Brightness: Mid", "c": "yel", "x": "brightness -s 5"},
-    {"t": "Brightness: Low", "c": "yel", "x": "brightness -s 1"},
-    {"t": "Brightness: Cycle", "c": "yel", "x": "brightness -c cycle"},
-    {"t": "LED color (hex)", "c": "mag", "x": "led -s {}", "p": "hex e.g. FF0000"},
-    {"t": "LED rainbow", "c": "mag", "x": "led -p rainbow"},
-    {"t": "Settings: Reset", "c": "red", "x": "settings -r"},
-    {"t": "Settings: set...", "c": "cy", "x": "settings -s {}", "p": "e.g. ForcePMKID enable"},
-    {"t": "List SD files", "c": "cy", "x": "ls /"},
-    {"t": "Protocol Info", "c": "cy", "x": "protocolinfo"},
-    {"t": "Backup SPIFFS -> SD", "c": "blu", "x": "backupspiffs"},
-    {"t": "Backup Status", "c": "blu", "x": "backupstatus"},
+  {"t": "Device", "c": "blu", "ic": "⚙", "m": [
+    {"t": "Update Firmware (SD)", "c": "org", "x": "update -s"},
+    {"t": "Backup SPIFFS", "c": "grn", "x": "backupspiffs"},
     {"t": "Restore SPIFFS", "c": "org", "x": "restorespiffs"},
-    {"t": "Update (SD)", "c": "org", "x": "update -s"},
+    {"t": "Save APs", "c": "cy", "x": "save -a"},
+    {"t": "Save SSIDs", "c": "cy", "x": "save -s"},
+    {"t": "Load APs", "c": "cy", "x": "load -a"},
+    {"t": "Load SSIDs", "c": "cy", "x": "load -s"},
+    {"t": "Brightness Max", "c": "yel", "x": "brightness -s 9"},
+    {"t": "Brightness Mid", "c": "yel", "x": "brightness -s 5"},
+    {"t": "Brightness Low", "c": "yel", "x": "brightness -s 1"},
+    {"t": "Device Info", "c": "wht", "x": "protocolinfo"},
+    {"t": "Settings Reset", "c": "red", "x": "settings -r"},
+    {"t": "Setting set...", "c": "cy", "x": "settings -s {}", "p": "e.g. ForcePMKID enable"},
+    {"t": "Geofences List", "c": "grn", "x": "geofence list"},
+    {"t": "Channel set...", "c": "cy", "x": "channel -s {}", "p": "channel #"},
+    {"t": "LED color (hex)", "c": "mag", "x": "led -s {}", "p": "hex e.g. FF0000"},
+    {"t": "SD File List", "c": "cy", "x": "ls /"},
     {"t": "Help (full list)", "c": "grn", "x": "help"},
-    {"t": "Reboot", "c": "red", "x": "reboot"},
   ]},
+  {"t": "Reboot", "c": "red", "ic": "↻", "x": "reboot"},
 ]
 
 PAGE = r"""<!doctype html>
@@ -304,23 +297,35 @@ PAGE = r"""<!doctype html>
   #dot{width:9px;height:9px;border-radius:50%;background:#ff5c5c;flex:0 0 auto;}
   #dot.ok{background:#45e08a;}
   .list{flex:1;overflow-y:auto;padding:7px;display:flex;flex-direction:column;gap:6px;}
-  .row{display:flex;align-items:center;gap:10px;padding:12px 12px;border-radius:9px;
-    background:#0d1620;border:1px solid #172334;border-left-width:5px;cursor:pointer;
-    color:#dfe8f2;font-size:15px;min-height:46px;}
-  .row:active{background:#15202e;}
-  .row .chev{margin-left:auto;color:#7f93a8;font-size:18px;}
-  .row.back{background:#0a1118;border-left-color:#7f93a8;color:#9fb4c8;font-weight:600;}
-  .row.on{background:#0f2018;border-left-color:#45e08a;}
+  .row{display:flex;align-items:center;gap:9px;padding:11px 11px;border-radius:9px;
+    background:#0c141d;border:1px solid #16212e;border-left-width:4px;cursor:pointer;
+    font-size:15px;min-height:46px;}
+  .row:active{background:#14202c;}
+  .row .ic{width:20px;text-align:center;font-size:15px;flex:0 0 auto;}
+  .row .lab{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    color:#e6edf3;font-weight:500;}
+  .row .chev{color:#7f93a8;font-size:17px;flex:0 0 auto;}
+  .row.back{background:#0a1118;border-left-color:#7f93a8;}
+  .row.back .lab{color:#9fb4c8;font-weight:600;}
+  .row.on{background:#0f2018;}
+  .row.dev{opacity:.5;}
   .pbar{display:flex;gap:6px;margin:2px 0 4px;}
   .pbtn{flex:1;background:#13213f;border:1px solid #244;color:#bfe0f0;border-radius:8px;
     padding:10px 4px;font-size:13px;font-weight:600;cursor:pointer;}
   .pbtn:active{background:#1b2d50;}
   .plbl{color:#7f93a8;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
     margin:8px 2px 1px;}
-  .row.c-cy{border-left-color:#2fd3e6;} .row.c-red{border-left-color:#ff5c5c;color:#ffd7d7;}
-  .row.c-grn{border-left-color:#45e08a;} .row.c-mag{border-left-color:#d07bff;}
-  .row.c-yel{border-left-color:#ffd23f;} .row.c-org{border-left-color:#ffae45;}
-  .row.c-blu{border-left-color:#5aa0ff;} .row.c-wht{border-left-color:#dfe8f2;}
+  .c-cy{border-left-color:#35d9ea;}  .c-cy  .lab,.c-cy  .ic{color:#35d9ea;}
+  .c-red{border-left-color:#ff6b6b;} .c-red .lab,.c-red .ic{color:#ff8e8e;}
+  .c-grn{border-left-color:#46e08a;} .c-grn .lab,.c-grn .ic{color:#5fe59c;}
+  .c-mag{border-left-color:#d98bff;} .c-mag .lab,.c-mag .ic{color:#d98bff;}
+  .c-yel{border-left-color:#ffd84a;} .c-yel .lab,.c-yel .ic{color:#ffe070;}
+  .c-org{border-left-color:#ffb057;} .c-org .lab,.c-org .ic{color:#ffc07a;}
+  .c-blu{border-left-color:#6aa6ff;} .c-blu .lab,.c-blu .ic{color:#8fbcff;}
+  .c-wht{border-left-color:#dfe8f2;} .c-wht .lab,.c-wht .ic{color:#eef4fb;}
+  .c-lime{border-left-color:#b6e34a;} .c-lime .lab,.c-lime .ic{color:#c6ea6f;}
+  .c-pur{border-left-color:#b98bff;} .c-pur .lab,.c-pur .ic{color:#c4a0ff;}
+  .c-sky{border-left-color:#67c6ff;} .c-sky .lab,.c-sky .ic{color:#8ad3ff;}
   .stopwrap{padding:7px;border-top:1px solid #223;display:flex;gap:7px;}
   .stop{flex:1;background:#3a1113;border:1px solid #6e2024;color:#ff8a8a;font-weight:800;
     border-radius:9px;padding:13px;font-size:16px;cursor:pointer;letter-spacing:.5px;}
@@ -398,25 +403,28 @@ PAGE = r"""<!doctype html>
   function render(){
     picker = null;
     const cur = stack[stack.length-1];
-    $("#title").textContent = cur.title;
+    $("#title").textContent = (cur.ic ? cur.ic + "  " : "") + cur.title;
     const list = $("#list"); list.innerHTML = "";
     if(stack.length > 1){
       const b = rowEl("‹ Back", "back", ""); b.onclick = () => { stack.pop(); render(); };
       list.appendChild(b);
     }
     for(const n of cur.nodes){
-      const sub = !!n.m, pick = !!n.pick;
-      const el = rowEl(n.t, "c-" + (n.c||"cy"), sub ? "›" : (pick ? "⠿" : ""));
-      el.onclick = sub ? () => { stack.push({title:n.t, nodes:n.m}); render(); }
-                 : pick ? () => openPicker()
+      const sub = !!n.m, pick = !!n.pick, dev = !!n.dev;
+      const el = rowEl(n.t, "c-" + (n.c||"cy") + (dev?" dev":""),
+                       sub ? "›" : (pick ? "⠿" : ""), n.ic);
+      el.onclick = sub  ? () => { stack.push({title:n.t, nodes:n.m, ic:n.ic}); render(); }
+                 : pick ? () => (n.pick==="html" ? openHtmlPicker() : openPicker())
+                 : dev  ? () => setStat("“"+n.t+"” is a device-screen feature (no remote command)")
                  : () => run(n);
       list.appendChild(el);
     }
     list.scrollTop = 0;
   }
-  function rowEl(text, cls, chev){
+  function rowEl(text, cls, chev, icon){
     const d=document.createElement("div"); d.className="row "+cls;
-    const s=document.createElement("span"); s.textContent=text; d.appendChild(s);
+    if(icon){ const i=document.createElement("span"); i.className="ic"; i.textContent=icon; d.appendChild(i); }
+    const s=document.createElement("span"); s.className="lab"; s.textContent=text; d.appendChild(s);
     if(chev){ const c=document.createElement("span"); c.className="chev"; c.textContent=chev; d.appendChild(c); }
     return d;
   }
@@ -485,6 +493,34 @@ PAGE = r"""<!doctype html>
   function lbl(t){ const d=document.createElement("div"); d.className="plbl"; d.textContent=t; return d; }
   function mkBtn(t,fn){ const b=document.createElement("button"); b.className="pbtn"; b.textContent=t; b.onclick=fn; return b; }
 
+  // ---- Evil Portal HTML picker ----
+  function openHtmlPicker(){
+    $("#title").textContent = "Evil Portal HTML";
+    const list = $("#list"); list.innerHTML = "";
+    list.appendChild(rowEl("Reading SD card…", "c-cy", "", ""));
+    fetch("/htmls" + (TOKEN ? "?t=" + encodeURIComponent(TOKEN) : ""))
+      .then(r => r.json()).then(j => renderHtmls(j.htmls || []))
+      .catch(() => { list.innerHTML=""; list.appendChild(rowEl("Could not read SD card.", "c-red", "", "")); });
+  }
+  function renderHtmls(files){
+    const list = $("#list"); list.innerHTML = "";
+    const back = rowEl("‹ Back", "back", "", ""); back.onclick = () => render(); list.appendChild(back);
+    const bar = document.createElement("div"); bar.className = "pbar";
+    bar.appendChild(mkBtn("⟳ Refresh", ()=>openHtmlPicker()));
+    list.appendChild(bar);
+    list.appendChild(lbl("Tap an .html to arm Evil Portal with it"));
+    if(!files.length){
+      list.appendChild(rowEl("No .html files on the SD card root.", "c-org", "", ""));
+      return;
+    }
+    files.forEach(f => {
+      const el = rowEl(f, "c-org", "set", "📄");
+      el.onclick = () => { send("evilportal -c sethtml " + f);
+        setStat("armed: " + f + "  (now WiFi ▸ Attacks ▸ Evil Portal)"); };
+      list.appendChild(el);
+    });
+  }
+
   stack.push({title:"MarauderBox", nodes:MENU});
   render();
 
@@ -528,6 +564,20 @@ def parse_ap_list(text):
             ssid, rssi = rest, 0
         aps.append({"i": idx, "ch": ch, "ssid": ssid, "rssi": rssi, "sel": sel})
     return aps
+
+
+HTML_RE = re.compile(r"[\w.\-/]+\.html\b", re.IGNORECASE)
+
+
+def parse_html_list(text):
+    """Pull .html filenames out of an `ls /` listing (Evil Portal templates)."""
+    seen, out = set(), []
+    for tok in HTML_RE.findall(text):
+        name = tok.rsplit("/", 1)[-1]
+        if name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(name)
+    return out
 
 
 # --- HTTP server --------------------------------------------------------------
@@ -579,6 +629,15 @@ def make_handler(bridge, token):
                 except Exception as e:
                     return self._send(500, f"serial error: {e}", "text/plain")
                 return self._send(200, json.dumps({"aps": parse_ap_list(text)}),
+                                   "application/json")
+            if u.path == "/htmls":
+                if not self._auth_ok(qs):
+                    return self._send(403, "forbidden", "text/plain")
+                try:
+                    text = bridge.send_and_collect("ls /")
+                except Exception as e:
+                    return self._send(500, f"serial error: {e}", "text/plain")
+                return self._send(200, json.dumps({"htmls": parse_html_list(text)}),
                                    "application/json")
             if u.path == "/out":
                 if not self._auth_ok(qs):
