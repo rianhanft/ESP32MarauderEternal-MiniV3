@@ -1,0 +1,13 @@
+# MarauderBox Cast config -- copy to the ROOT of your SD card as /cast.txt
+#
+# Used by NyanBox -> Sniffers -> Cast Scout  and  NyanBox -> Attacks -> Cast Rickroll.
+# The device joins this WiFi network, then discovers / casts to smart-TV targets
+# on it. Use only on networks and devices you own or are authorized to test.
+
+# WiFi network to join (must be 2.4 GHz; the ESP joins as a normal client).
+ssid = YourNetworkName
+password = YourNetworkPassword
+
+# YouTube video ID to launch on DIAL/Roku targets (the part after watch?v=).
+# Default if omitted: dQw4w9WgXcQ  (Rick Astley - Never Gonna Give You Up).
+video = dQw4w9WgXcQ

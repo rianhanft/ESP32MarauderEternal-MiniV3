@@ -10,6 +10,7 @@
 #include "WiFiCameraDetector.h"    // Ported from Marauder Eternal (WiFi Camera scanner)
 #include "DroneRemoteID.h"         // Ported from Marauder Eternal (Drone Remote ID scan/export)
 #include "DroneRemoteIDSpoofer.h"  // Ported from Marauder Eternal (Drone Spoof)
+#include "DialCast.h"              // Chromecast/DIAL cast discovery + rickroll
 #if defined(HAS_CSI_MOTION)
   #include "CsiMotionMonitor.h"
 #endif
@@ -5379,6 +5380,10 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         DroneRemoteID::exportRetained();          // ported from Marauder Eternal
         this->changeMenu(&nyanSnifferMenu, true);
       });
+      this->addNodes(menu, "Cast Scout", TFTGREEN, SCANNERS, [this]() {
+        DialCast::runDiscovery();                 // SSDP/DIAL device discovery
+        this->changeMenu(&nyanSnifferMenu, true);
+      });
       break;
 
     case MenuBuildKind::NYANBOX_ATTACKS:
@@ -5423,6 +5428,12 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         }
         this->confirmAction("Authorize Drone Spoof", &nyanAttackMenu, []() {
           DroneRemoteIDSpoofer::run();
+        });
+      });
+      this->addNodes(menu, "Cast Rickroll", TFTRED, ATTACKS, [this]() {
+        // Launch a YouTube video on DIAL/Roku targets on the joined network.
+        this->confirmAction("Authorize Cast Rickroll", &nyanAttackMenu, []() {
+          DialCast::runRickroll();
         });
       });
       break;
