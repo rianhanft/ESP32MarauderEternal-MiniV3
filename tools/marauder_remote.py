@@ -337,10 +337,26 @@ PAGE = r"""<!doctype html>
     border:1px solid #223;border-radius:9px;padding:11px;}
   .cmdbar button{background:#2fd3e6;color:#042026;border:none;border-radius:9px;
     font-weight:700;padding:0 15px;cursor:pointer;}
-  #log{background:#04070b;border:1px solid #223;border-radius:9px;padding:9px;height:26vh;
-    overflow:auto;white-space:pre-wrap;word-break:break-word;color:#bfe0f0;
-    font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
-  .tools{display:flex;gap:8px;align-items:center;margin-top:7px;color:#7f93a8;font-size:12px;}
+  .conhead{display:flex;align-items:center;gap:7px;padding:7px 11px;background:#0a1016;
+    border:1px solid #1b2a38;border-bottom:none;border-radius:10px 10px 0 0;color:#6f8498;
+    font-size:11px;letter-spacing:.09em;text-transform:uppercase;}
+  .conhead .cdot{width:7px;height:7px;border-radius:50%;background:#45e08a;
+    box-shadow:0 0 6px #45e08a;flex:0 0 auto;}
+  .conhead b{color:#cfe3f2;font-weight:700;}
+  .conhead .cport{margin-left:auto;color:#6f8498;text-transform:none;letter-spacing:0;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  #log{background:linear-gradient(180deg,#04080c,#060b11);border:1px solid #1b2a38;
+    border-top:none;border-radius:0 0 10px 10px;padding:9px 11px;height:27vh;overflow:auto;
+    word-break:break-word;box-shadow:inset 0 10px 22px rgba(0,0,0,.45);
+    font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  #log .ln{white-space:pre-wrap;padding:1px 3px;border-radius:3px;margin:0 -1px;}
+  #log .cmd{color:#38dced;font-weight:600;}
+  #log .cmd::before{content:"\276F ";color:#2a7f8c;}
+  #log .ap{color:#5fe59c;}
+  #log .ok{color:#ffe070;}
+  #log .err{color:#ff8e8e;background:rgba(255,90,90,.08);}
+  #log .dim{color:#9ab4cc;}
+  .tools{display:flex;gap:8px;align-items:center;margin-top:8px;color:#7f93a8;font-size:12px;}
   .tools button{padding:6px 10px;background:#0d1620;border:1px solid #223;border-radius:7px;
     color:#9fb4c8;font-size:12px;cursor:pointer;}
 </style></head>
@@ -363,9 +379,11 @@ PAGE = r"""<!doctype html>
       autocapitalize="off" spellcheck="false">
     <button onclick="sendInput()">Send</button>
   </div>
-  <pre id="log"></pre>
+  <div class="conhead"><span class="cdot"></span><b>Serial Console</b>
+    <span class="cport" id="cport">—</span></div>
+  <div id="log"></div>
   <div class="tools">
-    <button onclick="document.getElementById('log').textContent=''">Clear</button>
+    <button onclick="clearLog()">Clear</button>
     <label><input type="checkbox" id="auto" checked> autoscroll</label>
     <span id="stat"></span>
   </div>
@@ -380,6 +398,7 @@ PAGE = r"""<!doctype html>
 
   function send(c){
     toast(c);
+    appendLog("# " + c + "\n");
     return fetch("/cmd?c=" + encodeURIComponent(c) + tok())
       .then(r => { if(!r.ok) throw 0; flash(); })
       .catch(() => setStat("send failed"));
@@ -548,16 +567,45 @@ PAGE = r"""<!doctype html>
   stack.push({title:"MarauderBox", nodes:MENU});
   render();
 
-  // live serial console (start with a tail of recent output, then stream)
-  let pos=-1, first=true;
+  // live serial console: color-coded, line-buffered terminal
+  let pos=-1, first=true, pend="", liveEl=null;
+  const RE_AP=/^\[\d+\]\[CH:\d+\]/;
+  function classifyLine(s){
+    const t=s.trim();
+    if(!t) return "dim";
+    if(t[0]==="#") return "cmd";
+    if(RE_AP.test(t)) return "ap";
+    if(/\b(error|errors|failed|failure|invalid|unknown|can't|cannot|not found|no such|too large|denied|timeout|timed out)\b/i.test(t)) return "err";
+    if(/\b(start|starting|started|stop|stopped|stopping|found|done|complete|completed|finished|ready|saved|loaded|connected|launched|success|successful|enabled|disabled|ok)\b/i.test(t)) return "ok";
+    return "dim";
+  }
+  function addLine(s){
+    const log=$("#log"), cls=classifyLine(s);
+    const div=document.createElement("div");
+    div.className="ln "+cls;
+    div.textContent = cls==="cmd" ? s.replace(/^#\s?/,"") : s;
+    log.appendChild(div);
+    while(log.childNodes.length>1500) log.removeChild(log.firstChild);
+  }
+  function appendLog(text){
+    const log=$("#log");
+    if(liveEl && liveEl.parentNode===log) log.removeChild(liveEl);
+    liveEl=null;
+    pend += text;
+    const parts=pend.split("\n");
+    pend=parts.pop();
+    for(const ln of parts) addLine(ln.replace(/\r$/,""));
+    if(pend){ liveEl=document.createElement("div"); liveEl.className="ln "+classifyLine(pend);
+      liveEl.textContent=pend; log.appendChild(liveEl); }
+    if($("#auto").checked) log.scrollTop=log.scrollHeight;
+  }
+  function clearLog(){ $("#log").innerHTML=""; pend=""; liveEl=null; }
   function poll(){
     fetch("/out?pos=" + pos + tok()).then(r=>r.json()).then(j=>{
       $("#dot").classList.add("ok");
-      if(j.port) $("#port").textContent=j.port;
-      const log=$("#log");
-      if(first){ if(j.data) log.textContent=j.data; pos=j.pos; first=false; log.scrollTop=log.scrollHeight; }
-      else if(j.data){ log.textContent+=j.data; pos=j.pos;
-        if($("#auto").checked) log.scrollTop=log.scrollHeight; }
+      if(j.port){ $("#port").textContent=j.port; const cp=$("#cport"); if(cp) cp.textContent=j.port; }
+      if(first){ first=false; pos=j.pos; if(j.data) appendLog(j.data); }
+      else if(j.data){ pos=j.pos; appendLog(j.data); }
     }).catch(()=>{ $("#dot").classList.remove("ok"); setStat("disconnected"); })
       .finally(()=>setTimeout(poll,700));
   }
