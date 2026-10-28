@@ -26,6 +26,7 @@ Authorized use only: this is a remote control for a tool you own.
 """
 import argparse
 import json
+import re
 import socket
 import sys
 import threading
@@ -81,11 +82,34 @@ class SerialBridge:
     def read_since(self, pos: int):
         with self._lock:
             end = self._base + len(self._buf)
+            if pos < 0:  # tail: last ~4 KB, for the console on first load
+                pos = max(self._base, end - 4000)
             if pos < self._base:
                 pos = self._base
             start = pos - self._base
             chunk = bytes(self._buf[start:])
         return end, chunk.decode("latin-1")
+
+    def _end(self):
+        with self._lock:
+            return self._base + len(self._buf)
+
+    def send_and_collect(self, command, settle=0.5, timeout=2.5):
+        """Send a command and return the output it produces (until the device
+        goes quiet for `settle` seconds, or `timeout` elapses)."""
+        start = self._end()
+        self.send(command)
+        last_len, idle_since = start, time.time()
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(0.06)
+            end = self._end()
+            if end != last_len:
+                last_len, idle_since = end, time.time()
+            elif time.time() - idle_since >= settle and end > start:
+                break
+        _, text = self.read_since(start)
+        return text
 
 
 # --- Marauder-style menu tree -------------------------------------------------
@@ -128,7 +152,9 @@ MENU = [
       {"t": "Karma (index)", "c": "red", "x": "karma -p {}", "p": "SSID index"},
       {"t": "Evil Portal (start)", "c": "org", "x": "evilportal -c start"},
     ]},
+    {"t": "Select APs / SSIDs", "c": "grn", "pick": "ap"},
     {"t": "Target List", "c": "blu", "m": [
+      {"t": "Pick APs by SSID", "c": "grn", "pick": "ap"},
       {"t": "List APs", "c": "cy", "x": "list -a"},
       {"t": "List Stations", "c": "cy", "x": "list -s"},
       {"t": "List SSIDs", "c": "cy", "x": "list -c"},
@@ -280,6 +306,13 @@ PAGE = r"""<!doctype html>
   .row:active{background:#15202e;}
   .row .chev{margin-left:auto;color:#7f93a8;font-size:18px;}
   .row.back{background:#0a1118;border-left-color:#7f93a8;color:#9fb4c8;font-weight:600;}
+  .row.on{background:#0f2018;border-left-color:#45e08a;}
+  .pbar{display:flex;gap:6px;margin:2px 0 4px;}
+  .pbtn{flex:1;background:#13213f;border:1px solid #244;color:#bfe0f0;border-radius:8px;
+    padding:10px 4px;font-size:13px;font-weight:600;cursor:pointer;}
+  .pbtn:active{background:#1b2d50;}
+  .plbl{color:#7f93a8;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    margin:8px 2px 1px;}
   .row.c-cy{border-left-color:#2fd3e6;} .row.c-red{border-left-color:#ff5c5c;color:#ffd7d7;}
   .row.c-grn{border-left-color:#45e08a;} .row.c-mag{border-left-color:#d07bff;}
   .row.c-yel{border-left-color:#ffd23f;} .row.c-org{border-left-color:#ffae45;}
@@ -334,9 +367,11 @@ PAGE = r"""<!doctype html>
   const $ = s => document.querySelector(s);
   const tok = () => TOKEN ? "&t=" + encodeURIComponent(TOKEN) : "";
   const stack = [];            // breadcrumb of {title, nodes}
+  let picker = null;           // AP picker state when active
 
   function send(c){
-    fetch("/cmd?c=" + encodeURIComponent(c) + tok())
+    toast(c);
+    return fetch("/cmd?c=" + encodeURIComponent(c) + tok())
       .then(r => { if(!r.ok) throw 0; flash(); })
       .catch(() => setStat("send failed"));
   }
@@ -352,9 +387,12 @@ PAGE = r"""<!doctype html>
   function sendInput(){ const i=$("#cmd"); if(i.value.trim()){ send(i.value.trim()); i.value=""; } }
   $("#cmd").addEventListener("keydown", e => { if(e.key==="Enter") sendInput(); });
   function flash(){ const d=$("#dot"); d.style.boxShadow="0 0 9px #2fd3e6"; setTimeout(()=>d.style.boxShadow="",160); }
+  let statT;
   function setStat(s){ $("#stat").textContent=s; }
+  function toast(c){ setStat("sent: " + c); clearTimeout(statT); statT=setTimeout(()=>setStat(""),2200); }
 
   function render(){
+    picker = null;
     const cur = stack[stack.length-1];
     $("#title").textContent = cur.title;
     const list = $("#list"); list.innerHTML = "";
@@ -363,11 +401,11 @@ PAGE = r"""<!doctype html>
       list.appendChild(b);
     }
     for(const n of cur.nodes){
-      const sub = !!n.m;
-      const el = rowEl(n.t, "c-" + (n.c||"cy"), sub ? "›" : "");
-      el.onclick = sub
-        ? () => { stack.push({title:n.t, nodes:n.m}); render(); }
-        : () => run(n);
+      const sub = !!n.m, pick = !!n.pick;
+      const el = rowEl(n.t, "c-" + (n.c||"cy"), sub ? "›" : (pick ? "⠿" : ""));
+      el.onclick = sub ? () => { stack.push({title:n.t, nodes:n.m}); render(); }
+                 : pick ? () => openPicker()
+                 : () => run(n);
       list.appendChild(el);
     }
     list.scrollTop = 0;
@@ -379,17 +417,82 @@ PAGE = r"""<!doctype html>
     return d;
   }
 
+  // ---- AP / SSID picker ----
+  function openPicker(){
+    $("#title").textContent = "Select APs";
+    const list = $("#list"); list.innerHTML = "";
+    const l = rowEl("Loading AP list…", "c-cy", ""); list.appendChild(l);
+    fetch("/aplist" + (TOKEN ? "?t=" + encodeURIComponent(TOKEN) : ""))
+      .then(r => r.json()).then(j => { picker = j.aps || []; renderPicker(); })
+      .catch(() => { list.innerHTML=""; list.appendChild(rowEl("Could not read AP list.", "c-red", "")); });
+  }
+  function selCsv(indices){ return indices.join(","); }
+  function applySel(indices, want){
+    // toggle only the ones that need changing so we reach `want` state
+    const todo = indices.filter(i => picker[i].sel !== want);
+    if(!todo.length) return;
+    send("select -a " + selCsv(todo.map(i=>picker[i].i)));
+    todo.forEach(i => picker[i].sel = want);
+    renderPicker();
+  }
+  function renderPicker(){
+    const list = $("#list"); list.innerHTML = "";
+    const back = rowEl("‹ Back", "back", ""); back.onclick = () => render(); list.appendChild(back);
+    // action bar
+    const bar = document.createElement("div"); bar.className = "pbar";
+    bar.appendChild(mkBtn("⟳ Refresh", ()=>openPicker()));
+    bar.appendChild(mkBtn("Select ALL", ()=>applySel(picker.map((_,i)=>i), true)));
+    bar.appendChild(mkBtn("Clear ALL", ()=>applySel(picker.map((_,i)=>i), false)));
+    list.appendChild(bar);
+    if(!picker.length){
+      list.appendChild(rowEl("No APs. Run WiFi ▸ Sniffers ▸ Scan, press STOP, then Refresh.", "c-org", ""));
+      return;
+    }
+    // group by SSID
+    const groups = {};
+    picker.forEach((a,i)=>{ const k=a.ssid||"(hidden)"; (groups[k]=groups[k]||[]).push(i); });
+    list.appendChild(lbl("By SSID — tap to select every matching AP"));
+    Object.keys(groups).sort((a,b)=>a.toLowerCase()<b.toLowerCase()?-1:1).forEach(k=>{
+      const idxs = groups[k];
+      const selN = idxs.filter(i=>picker[i].sel).length;
+      const mark = selN===idxs.length ? "✓" : (selN? "◪" : "·");
+      const el = pickRow(mark + "  " + k, "("+selN+"/"+idxs.length+")", selN===idxs.length);
+      el.onclick = () => applySel(idxs, selN!==idxs.length); // all->clear else select all
+      list.appendChild(el);
+    });
+    // individual APs
+    list.appendChild(lbl("Individual APs — tap to toggle one"));
+    picker.forEach((a,i)=>{
+      const mark = a.sel ? "✓" : "·";
+      const el = pickRow(mark + "  [" + a.i + "] " + (a.ssid||"(hidden)"),
+                         a.rssi + "dBm CH" + a.ch, a.sel);
+      el.onclick = () => applySel([i], !a.sel);
+      list.appendChild(el);
+    });
+    list.scrollTop = 0;
+  }
+  function pickRow(text, right, on){
+    const d=document.createElement("div"); d.className="row "+(on?"c-grn on":"c-blu");
+    const s=document.createElement("span"); s.textContent=text; s.style.overflow="hidden";
+    s.style.textOverflow="ellipsis"; s.style.whiteSpace="nowrap"; d.appendChild(s);
+    const r=document.createElement("span"); r.className="chev"; r.textContent=right; r.style.fontSize="12px";
+    d.appendChild(r); return d;
+  }
+  function lbl(t){ const d=document.createElement("div"); d.className="plbl"; d.textContent=t; return d; }
+  function mkBtn(t,fn){ const b=document.createElement("button"); b.className="pbtn"; b.textContent=t; b.onclick=fn; return b; }
+
   stack.push({title:"MarauderBox", nodes:MENU});
   render();
 
-  // live serial console
-  let pos=0, first=true;
+  // live serial console (start with a tail of recent output, then stream)
+  let pos=-1, first=true;
   function poll(){
     fetch("/out?pos=" + pos + tok()).then(r=>r.json()).then(j=>{
       $("#dot").classList.add("ok");
       if(j.port) $("#port").textContent=j.port;
-      if(first){ pos=j.pos; first=false; }
-      else if(j.data){ const log=$("#log"); log.textContent+=j.data; pos=j.pos;
+      const log=$("#log");
+      if(first){ if(j.data) log.textContent=j.data; pos=j.pos; first=false; log.scrollTop=log.scrollHeight; }
+      else if(j.data){ log.textContent+=j.data; pos=j.pos;
         if($("#auto").checked) log.scrollTop=log.scrollHeight; }
     }).catch(()=>{ $("#dot").classList.remove("ok"); setStat("disconnected"); })
       .finally(()=>setTimeout(poll,700));
@@ -397,6 +500,30 @@ PAGE = r"""<!doctype html>
   poll();
 </script>
 </body></html>"""
+
+
+# --- parse `list -a` output ("[0][CH:6] MyWiFi -42 (selected)") ---------------
+
+AP_RE = re.compile(r"^\[(\d+)\]\[CH:(\d+)\]\s(.*)$")
+
+
+def parse_ap_list(text):
+    aps = []
+    for raw in text.splitlines():
+        m = AP_RE.match(raw.strip())
+        if not m:
+            continue
+        idx, ch, rest = int(m.group(1)), int(m.group(2)), m.group(3)
+        sel = rest.endswith("(selected)")
+        if sel:
+            rest = rest[: -len("(selected)")].rstrip()
+        parts = rest.rsplit(None, 1)  # rssi is the trailing token; essid is the rest
+        if len(parts) == 2 and parts[1].lstrip("-").isdigit():
+            ssid, rssi = parts[0], int(parts[1])
+        else:
+            ssid, rssi = rest, 0
+        aps.append({"i": idx, "ch": ch, "ssid": ssid, "rssi": rssi, "sel": sel})
+    return aps
 
 
 # --- HTTP server --------------------------------------------------------------
@@ -436,6 +563,15 @@ def make_handler(bridge, token):
                     except Exception as e:
                         return self._send(500, f"serial error: {e}", "text/plain")
                 return self._send(200, "ok", "text/plain")
+            if u.path == "/aplist":
+                if not self._auth_ok(qs):
+                    return self._send(403, "forbidden", "text/plain")
+                try:
+                    text = bridge.send_and_collect("list -a")
+                except Exception as e:
+                    return self._send(500, f"serial error: {e}", "text/plain")
+                return self._send(200, json.dumps({"aps": parse_ap_list(text)}),
+                                   "application/json")
             if u.path == "/out":
                 if not self._auth_ok(qs):
                     return self._send(403, "forbidden", "text/plain")
@@ -465,15 +601,41 @@ def autodetect_port():
     return ports[0].device if ports else None
 
 
-def lan_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def lan_ips():
+    """All candidate LAN IPv4 addresses, the internet-routable one first."""
+    ips = []
     try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
-    except Exception:
-        return "127.0.0.1"
-    finally:
+        ips.append(s.getsockname()[0])
         s.close()
+    except Exception:
+        pass
+    try:
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            ips.append(ip)
+    except Exception:
+        pass
+    out = []
+    for ip in ips:
+        if ip and not ip.startswith("127.") and ip not in out:
+            out.append(ip)
+    return out or ["127.0.0.1"]
+
+
+def print_qr(url):
+    try:
+        import qrcode
+    except Exception:
+        return False
+    try:
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(url)
+        qr.make(fit=True)
+        qr.print_ascii(invert=True)
+        return True
+    except Exception:
+        return False
 
 
 def main():
@@ -503,17 +665,29 @@ def main():
     handler = make_handler(bridge, args.token)
     httpd = ThreadingHTTPServer((args.host, args.http_port), handler)
 
-    ip = lan_ip()
-    url = f"http://{ip}:{args.http_port}/"
-    if args.token:
-        url += f"?t={args.token}"
-    print("=" * 60)
+    ips = lan_ips()
+    suffix = f"?t={args.token}" if args.token else ""
+    primary = f"http://{ips[0]}:{args.http_port}/{suffix}"
+    print("=" * 64)
     print("  MarauderBox Remote ready")
-    print(f"  Serial : {port} @ {args.baud}")
-    print(f"  Open on your phone (same WiFi):  {url}")
+    print(f"  Serial : {port} @ {args.baud}    HTTP port: {args.http_port}")
+    print("  Open ONE of these on your phone (same WiFi as this computer):")
+    for ip in ips:
+        print(f"      http://{ip}:{args.http_port}/{suffix}")
+    print("")
+    if print_qr(primary):
+        print("  ^ or scan the QR above with your phone camera.")
+    else:
+        print("  (tip: `pip install qrcode` to print a scannable QR here)")
+    print("  Phone can't open it? Check all of these:")
+    print("   * phone + computer on the SAME WiFi (not a guest network, not cellular)")
+    print(f"   * allow Python through the firewall (inbound TCP {args.http_port}) -- the")
+    print("     usual cause on Windows/macOS; approve the prompt or add a rule")
+    print("   * some routers block device-to-device ('AP/client isolation') -- turn it off")
+    print("   * try each URL above; the one on your phone's subnet is the right one")
     if not args.token:
-        print("  (anyone on this network can control it -- add --token to lock down)")
-    print("=" * 60)
+        print("   * no token set: anyone on this network can control it (use --token to lock)")
+    print("=" * 64)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

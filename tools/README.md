@@ -45,6 +45,27 @@ python3 marauder_remote.py --http-port 8080
 python3 marauder_remote.py --token mysecret        # require ?t=mysecret on the URL
 ```
 
+## Picking targets (no typing)
+
+**WiFi > Select APs / SSIDs** reads the device's AP list and shows it:
+- **By SSID** — tap a network name to select **every** AP broadcasting it (one
+  tap). The count (e.g. `MyWiFi (1/3)`) and check mark show how many are picked.
+- **Individual APs** — tap one to toggle just it.
+- **Refresh / Select ALL / Clear ALL** at the top.
+
+First do **WiFi > Sniffers > Scan APs+STAs**, press **STOP**, then open the
+picker (it runs `list -a` for you). Selections feed the attacks (deauth, etc.).
+
+## Can't open it on your phone?
+
+The script prints **every** candidate URL on startup -- try each; the right one
+is on your phone's subnet. If none work:
+- phone + computer must be on the **same WiFi** (not a guest network, not cellular);
+- **allow Python through the firewall** (inbound TCP on the port) -- the most
+  common cause on Windows/macOS;
+- some routers block device-to-device traffic ("AP/client isolation") -- disable it.
+- `pip install qrcode` to also print a scannable QR of the URL.
+
 ## Notes
 
 - Navigate like the device: tap **WiFi > Attacks > Deauth**, etc. The title bar
