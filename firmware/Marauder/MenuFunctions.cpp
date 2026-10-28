@@ -2303,6 +2303,9 @@ void MenuFunctions::RunSetup()
   foxSortMenu.list = new LinkedList<MenuNode>();
   foxFilterMenu.list = new LinkedList<MenuNode>();
   selectProbeSSIDsMenu.list = new LinkedList<MenuNode>();
+  // Guided attack workflow screens (built on demand by the workflow helpers).
+  attackTargetsMenu.list = new LinkedList<MenuNode>();
+  attackReviewMenu.list = new LinkedList<MenuNode>();
 
   // WiFi HTML menu stuff
   htmlMenu.list = new LinkedList<MenuNode>();
@@ -4956,153 +4959,203 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
       break;
 
     case MenuBuildKind::WIFI_ATTACK:
+      // Guided workflow: selecting an attack seeds a plan and routes to the
+      // targets it needs, then an authoritative Review screen. The closures below
+      // hold each attack's exact original launch, so "Start Attack" reproduces the
+      // legacy behavior unchanged. The serial `attack` command is not affected.
       this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this]() {
         this->changeMenu(wifiAttackMenu.parentMenu, true);
       });
+      // Beacon Spam List -> pick retained SSIDs
       this->addNodes(menu, text_table1[50], TFTRED, BEACON_LIST, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_BEACON_LIST, TFT_RED);
+        this->beginAttackPlan(text_table1[50], TFTRED, AttackScope::SSID_LIST, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_BEACON_LIST, TFT_RED);
+        });
       });
+      // Beacon Spam Random -> targetless
       this->addNodes(menu, text_table1[51], TFTORANGE, BEACON_SPAM, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_BEACON_SPAM, TFT_ORANGE);
+        this->beginAttackPlan(text_table1[51], TFTORANGE, AttackScope::TARGETLESS, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_BEACON_SPAM, TFT_ORANGE);
+        });
       });
+      // Funny SSID Beacon -> targetless
       this->addNodes(menu, text1_67, TFTCYAN, FUNNY_BEACON, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_FUNNY_BEACON, TFT_CYAN);
+        this->beginAttackPlan(text1_67, TFTCYAN, AttackScope::TARGETLESS, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_FUNNY_BEACON, TFT_CYAN);
+        });
       });
+      // Rick Roll Beacon -> targetless
       this->addNodes(menu, text_table1[52], TFTYELLOW, RICK_ROLL, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_RICK_ROLL, TFT_YELLOW);
+        this->beginAttackPlan(text_table1[52], TFTYELLOW, AttackScope::TARGETLESS, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_RICK_ROLL, TFT_YELLOW);
+        });
       });
+      // Probe Req Flood -> targetless
       this->addNodes(menu, text_table1[53], TFTRED, PROBE_SNIFF, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_AUTH, TFT_RED);
+        this->beginAttackPlan(text_table1[53], TFTRED, AttackScope::TARGETLESS, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_AUTH, TFT_RED);
+        });
       });
+      // Evil Portal -> pick one SSID/AP, then review. Keeps the existing picker.
       this->addNodes(menu, "Evil Portal", TFTORANGE, BEACON_SNIFF, [this]() {
-        wifiAPMenu.list->clear();
-        ssidsMenu.list->clear();
-        wifiAPMenu.parentMenu = &evilPortalMenu;
-        ssidsMenu.parentMenu = &evilPortalMenu;
-        this->addNodes(&wifiAPMenu, text09, TFTLIGHTGREY, 0, [this]() {
-          this->changeMenu(wifiAPMenu.parentMenu, true);
-        });
-        this->addNodes(&ssidsMenu, text09, TFTLIGHTGREY, 0, [this]() {
-          this->changeMenu(ssidsMenu.parentMenu, true);
-        });
-        // Build the pickers with their node/label allocations in PSRAM, not the
-        // internal (DMA) heap: one node per scanned AP otherwise starves the
-        // softAP (phone can't join) and the next scan's Wi-Fi init (rescan finds
-        // nothing) when the AP list is long. Restored before changeMenu() below
-        // so rendering keeps using DMA-capable internal memory.
-        wifi_scan_obj.beginExtmemAlloc();
-        for (int i = 0; i < access_points->size(); i++) {
-          const String label = screenName(access_points->get(i).essid);
-          this->addNodes(&wifiAPMenu, label.c_str(), TFTCYAN, 255, [this, i]() {
-            if (evil_portal_obj.setAP(access_points->get(i).essid)) {
-              AccessPoint new_ap = access_points->get(i);
+        attack_plan.name = "Evil Portal";
+        attack_plan.color = TFTORANGE;
+        attack_plan.scope = AttackScope::SSID_ONE;
+        attack_plan.oneSsid = "";
+        attack_plan.oneApIndex = -1;
+        attack_plan.launch = [this]() {
+          if (evil_portal_obj.setAP(attack_plan.oneSsid)) {
+            // Preserve the legacy AP-branch side effects when hosting on a scanned AP.
+            if (attack_plan.oneApIndex >= 0 && attack_plan.oneApIndex < access_points->size()) {
+              AccessPoint new_ap = access_points->get(attack_plan.oneApIndex);
               new_ap.selected = true;
-              access_points->set(i, new_ap);
-              evil_portal_obj.ap_index = i;
-              display_obj.clearScreen();
-              this->drawStatusBar();
-              wifi_scan_obj.StartScan(WIFI_SCAN_EVIL_PORTAL, TFT_ORANGE);
-              wifi_scan_obj.setMac();
+              access_points->set(attack_plan.oneApIndex, new_ap);
+              evil_portal_obj.ap_index = attack_plan.oneApIndex;
             }
-            else
-              this->changeMenu(&evilPortalMenu, true);
+            display_obj.clearScreen();
+            this->drawStatusBar();
+            wifi_scan_obj.StartScan(WIFI_SCAN_EVIL_PORTAL, TFT_ORANGE);
+            wifi_scan_obj.setMac();
+          } else {
+            this->changeMenu(&evilPortalMenu, true);
+          }
+        };
+        attack_plan.reopenTargets = [this]() {
+          wifiAPMenu.list->clear();
+          ssidsMenu.list->clear();
+          wifiAPMenu.parentMenu = &evilPortalMenu;
+          ssidsMenu.parentMenu = &evilPortalMenu;
+          this->addNodes(&wifiAPMenu, text09, TFTLIGHTGREY, 0, [this]() {
+            this->changeMenu(wifiAPMenu.parentMenu, true);
           });
-        }
-        for (int i = 0; i < ssids->size(); i++) {
-          const String label = screenName(ssids->get(i).essid);
-          this->addNodes(&ssidsMenu, label.c_str(), TFTCYAN, 255, [this, i]() {
-            if (evil_portal_obj.setAP(ssids->get(i).essid)) {
-              display_obj.clearScreen();
-              this->drawStatusBar();
-              wifi_scan_obj.StartScan(WIFI_SCAN_EVIL_PORTAL, TFT_ORANGE);
-              wifi_scan_obj.setMac();
-            }
-            else
-              this->changeMenu(&evilPortalMenu, true);
+          this->addNodes(&ssidsMenu, text09, TFTLIGHTGREY, 0, [this]() {
+            this->changeMenu(ssidsMenu.parentMenu, true);
           });
-        }
-        wifi_scan_obj.endExtmemAlloc();
-        this->changeMenu(&evilPortalMenu, true);
+          // Allocate the picker nodes in PSRAM (see note: long AP lists otherwise
+          // starve the DMA heap and break the softAP / next scan).
+          wifi_scan_obj.beginExtmemAlloc();
+          for (int i = 0; i < access_points->size(); i++) {
+            const String label = screenName(access_points->get(i).essid);
+            this->addNodes(&wifiAPMenu, label.c_str(), TFTCYAN, 255, [this, i]() {
+              attack_plan.oneSsid = access_points->get(i).essid;
+              attack_plan.oneApIndex = i;   // hosting on a scanned AP
+              this->buildAttackReview();
+            });
+          }
+          for (int i = 0; i < ssids->size(); i++) {
+            const String label = screenName(ssids->get(i).essid);
+            this->addNodes(&ssidsMenu, label.c_str(), TFTCYAN, 255, [this, i]() {
+              attack_plan.oneSsid = ssids->get(i).essid;
+              attack_plan.oneApIndex = -1;  // hosting on a retained SSID
+              this->buildAttackReview();
+            });
+          }
+          wifi_scan_obj.endExtmemAlloc();
+          this->changeMenu(&evilPortalMenu, true);
+        };
+        attack_plan.reopenTargets();
       });
+      // Deauth Flood -> AP-targeted
       this->addNodes(menu, text_table1[54], TFTRED, DEAUTH_SNIFF, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_DEAUTH, TFT_RED);
-      });
-      this->addNodes(menu, text_table1[57], TFTMAGENTA, BEACON_LIST, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_AP_SPAM, TFT_MAGENTA);
-      });
-      this->addNodes(menu, text_table1[62], TFTRED, DEAUTH_SNIFF, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_DEAUTH_TARGETED, TFT_ORANGE);
-      });
-      this->addNodes(menu, "Karma", TFTORANGE, KEYBOARD_ICO, [this]() {
-        selectProbeSSIDsMenu.list->clear();
-        this->addNodes(&selectProbeSSIDsMenu, text09, TFTLIGHTGREY, 0, [this]() {
-          this->changeMenu(&wifiAttackMenu, true);
+        this->beginAttackPlan(text_table1[54], TFTRED, AttackScope::AP, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_DEAUTH, TFT_RED);
         });
-        for (int i = 0; i < probe_req_ssids->size(); i++) {
-          const String label = screenName(probe_req_ssids->get(i).essid);
-          this->addNodes(&selectProbeSSIDsMenu, label.c_str(), TFTCYAN, 255, [this, i]() {
-            if (evil_portal_obj.setAP(probe_req_ssids->get(i).essid)) {
-              display_obj.clearScreen();
-              this->drawStatusBar();
-              wifi_scan_obj.StartScan(WIFI_SCAN_EVIL_PORTAL, TFT_ORANGE);
-              wifi_scan_obj.setMac();
-            }
-            else
-              this->changeMenu(&wifiAttackMenu, true);
-          });
-        }
-        this->changeMenu(&selectProbeSSIDsMenu, true);
       });
+      // AP Clone Spam -> AP-targeted
+      this->addNodes(menu, text_table1[57], TFTMAGENTA, BEACON_LIST, [this]() {
+        this->beginAttackPlan(text_table1[57], TFTMAGENTA, AttackScope::AP, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_AP_SPAM, TFT_MAGENTA);
+        });
+      });
+      // Deauth Targeted -> AP-targeted
+      this->addNodes(menu, text_table1[62], TFTRED, DEAUTH_SNIFF, [this]() {
+        this->beginAttackPlan(text_table1[62], TFTRED, AttackScope::AP, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_DEAUTH_TARGETED, TFT_ORANGE);
+        });
+      });
+      // Karma -> pick one probe SSID, then review. Keeps the existing picker.
+      this->addNodes(menu, "Karma", TFTORANGE, KEYBOARD_ICO, [this]() {
+        attack_plan.name = "Karma";
+        attack_plan.color = TFTORANGE;
+        attack_plan.scope = AttackScope::SSID_ONE;
+        attack_plan.oneSsid = "";
+        attack_plan.oneApIndex = -1;
+        attack_plan.launch = [this]() {
+          if (evil_portal_obj.setAP(attack_plan.oneSsid)) {
+            display_obj.clearScreen();
+            this->drawStatusBar();
+            wifi_scan_obj.StartScan(WIFI_SCAN_EVIL_PORTAL, TFT_ORANGE);
+            wifi_scan_obj.setMac();
+          } else {
+            this->changeMenu(&wifiAttackMenu, true);
+          }
+        };
+        attack_plan.reopenTargets = [this]() {
+          selectProbeSSIDsMenu.list->clear();
+          this->addNodes(&selectProbeSSIDsMenu, text09, TFTLIGHTGREY, 0, [this]() {
+            this->changeMenu(&wifiAttackMenu, true);
+          });
+          for (int i = 0; i < probe_req_ssids->size(); i++) {
+            const String label = screenName(probe_req_ssids->get(i).essid);
+            this->addNodes(&selectProbeSSIDsMenu, label.c_str(), TFTCYAN, 255, [this, i]() {
+              attack_plan.oneSsid = probe_req_ssids->get(i).essid;
+              this->buildAttackReview();
+            });
+          }
+          this->changeMenu(&selectProbeSSIDsMenu, true);
+        };
+        attack_plan.reopenTargets();
+      });
+      // Bad Msg -> AP-targeted (per-AP station profiles arrive in Stage 2)
       this->addNodes(menu, "Bad Msg", TFTRED, DEAUTH_SNIFF, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_BAD_MSG, TFT_RED);
+        this->beginAttackPlan("Bad Msg", TFTRED, AttackScope::AP, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_BAD_MSG, TFT_RED);
+        });
       });
       this->addNodes(menu, "Bad Msg Targeted", TFTYELLOW, DEAUTH_SNIFF, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_BAD_MSG_TARGETED, TFT_YELLOW);
+        this->beginAttackPlan("Bad Msg Targeted", TFTYELLOW, AttackScope::AP, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_BAD_MSG_TARGETED, TFT_YELLOW);
+        });
       });
       this->addNodes(menu, "Assoc Sleep", TFTRED, DEAUTH_SNIFF, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_SLEEP, TFT_RED);
+        this->beginAttackPlan("Assoc Sleep", TFTRED, AttackScope::AP, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_SLEEP, TFT_RED);
+        });
       });
       this->addNodes(menu, "Assoc Sleep Targ", TFTMAGENTA, DEAUTH_SNIFF, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_SLEEP_TARGETED, TFT_MAGENTA);
+        this->beginAttackPlan("Assoc Sleep Targ", TFTMAGENTA, AttackScope::AP, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_SLEEP_TARGETED, TFT_MAGENTA);
+        });
       });
       this->addNodes(menu, "SAE Commit Flood", TFTLIME, EAPOL, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_SAE_COMMIT, TFT_GREEN);
+        this->beginAttackPlan("SAE Commit Flood", TFTLIME, AttackScope::AP, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_SAE_COMMIT, TFT_GREEN);
+        });
       });
       this->addNodes(menu, "Channel Switch", TFTORANGE, BEACON_LIST, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_CSA, TFT_GREEN);
+        this->beginAttackPlan("Channel Switch", TFTORANGE, AttackScope::AP, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_CSA, TFT_GREEN);
+        });
       });
       this->addNodes(menu, "Quiet Time", TFTRED, BEACON_LIST, [this]() {
-        display_obj.clearScreen();
-        this->drawStatusBar();
-        wifi_scan_obj.StartScan(WIFI_ATTACK_QUIET, TFT_GREEN);
+        this->beginAttackPlan("Quiet Time", TFTRED, AttackScope::AP, [this]() {
+          display_obj.clearScreen(); this->drawStatusBar();
+          wifi_scan_obj.StartScan(WIFI_ATTACK_QUIET, TFT_GREEN);
+        });
       });
       break;
 
@@ -5496,6 +5549,178 @@ void MenuFunctions::confirmAction(const char* title, Menu* returnMenu,
     this->changeMenu(bleConfirmMenu.parentMenu, true);
   });
   this->changeMenu(&bleConfirmMenu, true);
+}
+
+// ---- Guided attack workflow (Choose Targets -> Review Attack -> Start) --------
+// beginAttackPlan seeds the plan and routes to the first screen the attack needs.
+// `launch` is a closure that performs the real StartScan, so each attack keeps its
+// exact existing launch behavior; the workflow only gates it behind target
+// selection and the authoritative Review screen.
+void MenuFunctions::beginAttackPlan(const String& name, uint8_t color,
+                                    AttackScope scope, std::function<void()> launch) {
+  attack_plan.name = name;
+  attack_plan.color = color;
+  attack_plan.scope = scope;
+  attack_plan.oneSsid = "";
+  attack_plan.oneApIndex = -1;
+  attack_plan.launch = launch;
+
+  if (scope == AttackScope::TARGETLESS) {
+    attack_plan.reopenTargets = [this]() { this->changeMenu(&wifiAttackMenu, true); };
+    this->buildAttackReview();
+  } else {
+    // AP / SSID_LIST targets are collected by buildAttackTargets. SSID_ONE attacks
+    // seed the plan themselves and override reopenTargets with their own picker.
+    attack_plan.reopenTargets = [this]() { this->buildAttackTargets(); };
+    this->buildAttackTargets();
+  }
+}
+
+uint16_t MenuFunctions::attackTargetCount() const {
+  uint16_t n = 0;
+  if (attack_plan.scope == AttackScope::AP) {
+    for (int i = 0; i < access_points->size(); i++)
+      if (access_points->get(i).selected) n++;
+  } else if (attack_plan.scope == AttackScope::SSID_LIST) {
+    for (int i = 0; i < ssids->size(); i++)
+      if (ssids->get(i).selected) n++;
+  }
+  return n;
+}
+
+bool MenuFunctions::attackPlanValid() const {
+  switch (attack_plan.scope) {
+    case AttackScope::TARGETLESS: return true;
+    case AttackScope::AP:         return attackTargetCount() > 0;
+    // Beacon List spams the whole retained list when nothing is selected, so the
+    // only requirement is that at least one SSID has been retained.
+    case AttackScope::SSID_LIST:  return ssids->size() > 0;
+    case AttackScope::SSID_ONE:   return attack_plan.oneSsid.length() > 0;
+  }
+  return false;
+}
+
+// "Choose Targets": AP / SSID_LIST multi-select. Toggling a row flips that
+// target's shared `selected` flag (so an existing selection seeds the plan) and
+// rebuilds the list so the [x]/[ ] marker refreshes.
+void MenuFunctions::buildAttackTargets() {
+  Menu* m = &attackTargetsMenu;
+  m->list->clear();
+  m->name = "Choose Targets";
+  m->parentMenu = &wifiAttackMenu;
+
+  const bool apScope = (attack_plan.scope == AttackScope::AP);
+
+  this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() {
+    this->changeMenu(&wifiAttackMenu, true);
+  });
+  this->addNodes(m, "Select All", TFTGREEN, 255, [this, apScope]() {
+    if (apScope) {
+      for (int i = 0; i < access_points->size(); i++) {
+        AccessPoint a = access_points->get(i); a.selected = true; access_points->set(i, a);
+      }
+    } else {
+      for (int i = 0; i < ssids->size(); i++) {
+        ssid s = ssids->get(i); s.selected = true; ssids->set(i, s);
+      }
+    }
+    this->buildAttackTargets();
+  });
+  this->addNodes(m, "Clear All", TFTORANGE, 255, [this, apScope]() {
+    if (apScope) {
+      for (int i = 0; i < access_points->size(); i++) {
+        AccessPoint a = access_points->get(i); a.selected = false; access_points->set(i, a);
+      }
+    } else {
+      for (int i = 0; i < ssids->size(); i++) {
+        ssid s = ssids->get(i); s.selected = false; ssids->set(i, s);
+      }
+    }
+    this->buildAttackTargets();
+  });
+
+  if (apScope) {
+    for (int i = 0; i < access_points->size(); i++) {
+      const bool sel = access_points->get(i).selected;
+      const String label = String(sel ? "[x] " : "[ ] ") + screenName(access_points->get(i).essid);
+      this->addNodes(m, label.c_str(), sel ? TFTCYAN : TFTLIGHTGREY, 255, [this, i]() {
+        AccessPoint a = access_points->get(i); a.selected = !a.selected; access_points->set(i, a);
+        this->buildAttackTargets();
+      });
+    }
+  } else {
+    for (int i = 0; i < ssids->size(); i++) {
+      const bool sel = ssids->get(i).selected;
+      const String label = String(sel ? "[x] " : "[ ] ") + screenName(ssids->get(i).essid);
+      this->addNodes(m, label.c_str(), sel ? TFTCYAN : TFTLIGHTGREY, 255, [this, i]() {
+        ssid s = ssids->get(i); s.selected = !s.selected; ssids->set(i, s);
+        this->buildAttackTargets();
+      });
+    }
+  }
+
+  // Continue to the authoritative Review screen.
+  this->addNodes(m, "Review / Continue", attack_plan.color, ATTACKS, [this]() {
+    this->buildAttackReview();
+  });
+
+  this->changeMenu(m, true);
+}
+
+// "Review Attack": the authoritative screen. Shows attack / scope / profile as
+// non-interactive rows and offers "Start Attack" only when the plan validates.
+void MenuFunctions::buildAttackReview() {
+  Menu* m = &attackReviewMenu;
+  m->list->clear();
+  m->name = "Review Attack";
+  m->parentMenu = &wifiAttackMenu;
+
+  this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() {
+    if (attack_plan.reopenTargets) attack_plan.reopenTargets();
+    else this->changeMenu(&wifiAttackMenu, true);
+  });
+
+  this->addNodes(m, (String("Attack: ") + attack_plan.name).c_str(), TFTWHITE, 255, []() {});
+
+  String scopeText;
+  switch (attack_plan.scope) {
+    case AttackScope::TARGETLESS: scopeText = "Scope: Targetless"; break;
+    case AttackScope::AP:         scopeText = "Scope: Access points"; break;
+    case AttackScope::SSID_LIST:  scopeText = "Scope: Retained SSIDs"; break;
+    case AttackScope::SSID_ONE:   scopeText = "Scope: One SSID"; break;
+  }
+  this->addNodes(m, scopeText.c_str(), TFTLIGHTGREY, 255, []() {});
+
+  String profileText;
+  switch (attack_plan.scope) {
+    case AttackScope::TARGETLESS:
+      profileText = "Profile: none needed"; break;
+    case AttackScope::AP:
+      profileText = String("Profile: ") + attackTargetCount() + " AP(s)"; break;
+    case AttackScope::SSID_LIST: {
+      const uint16_t sel = attackTargetCount();
+      profileText = sel ? (String("Profile: ") + sel + " of " + ssids->size() + " SSIDs")
+                        : (String("Profile: all ") + ssids->size() + " SSIDs");
+      break;
+    }
+    case AttackScope::SSID_ONE:
+      profileText = String("Profile: ") +
+        (attack_plan.oneSsid.length() ? screenName(attack_plan.oneSsid) : String("(none)"));
+      break;
+  }
+  this->addNodes(m, profileText.c_str(), TFTLIGHTGREY, 255, []() {});
+
+  if (this->attackPlanValid()) {
+    this->addNodes(m, "Start Attack", attack_plan.color, ATTACKS, [this]() {
+      if (attack_plan.launch) attack_plan.launch();
+    });
+  } else {
+    this->addNodes(m, "Select targets first", TFTDARKGREY, 255, [this]() {
+      if (attack_plan.reopenTargets) attack_plan.reopenTargets();
+    });
+  }
+
+  this->changeMenu(m, true);
 }
 
 void MenuFunctions::setGraphScale(float scale) {

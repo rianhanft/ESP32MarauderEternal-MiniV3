@@ -207,6 +207,35 @@ class MenuFunctions
     TargetSortMode fox_sort_mode = TargetSortMode::SIGNAL_DESC;
     TargetFilterMode fox_filter_mode = TargetFilterMode::ALL;
 
+    // --- Guided attack workflow (v1.20-style: Choose Targets -> Review -> Start) --
+    // Wraps the on-device WiFi > Attacks menu so an attack first collects the
+    // targets it needs, then shows a Review screen whose "Start Attack" row only
+    // appears when the plan is valid. The serial `attack` command is untouched and
+    // keeps its legacy selected-list behavior.
+    enum class AttackScope : uint8_t {
+      TARGETLESS,   // Random / Funny / Rick Roll / Probe flood - no retained list
+      AP,           // AP-targeted (Deauth, CSA, Quiet, SAE, AP spam, Bad Msg, ...)
+      SSID_LIST,    // Beacon Spam List - retained user SSIDs
+      SSID_ONE,     // Evil Portal / Karma - one explicit SSID
+    };
+    struct AttackPlan {
+      String name;                          // display name shown on Review
+      uint8_t color = TFTRED;               // menu palette index for the attack
+      AttackScope scope = AttackScope::TARGETLESS;
+      String oneSsid;                       // chosen SSID for SSID_ONE
+      int oneApIndex = -1;                  // chosen scanned-AP index for Evil Portal (-1 = SSID)
+      std::function<void()> launch;         // performs the real StartScan (legacy path)
+      std::function<void()> reopenTargets;  // re-enter the target step from Review
+    };
+    AttackPlan attack_plan;
+
+    void beginAttackPlan(const String& name, uint8_t color, AttackScope scope,
+                         std::function<void()> launch);
+    void buildAttackTargets();              // "Choose Targets" (AP / SSID multi-select)
+    void buildAttackReview();               // "Review Attack" (+ conditional Start)
+    uint16_t attackTargetCount() const;     // # selected APs / SSIDs for the plan
+    bool attackPlanValid() const;
+
     // Main menu stuff
     Menu mainMenu;
     Menu reconMenu;
@@ -255,6 +284,8 @@ class MenuFunctions
     Menu wifiSnifferMenu;
     Menu wifiScannerMenu;
     Menu wifiAttackMenu;
+    Menu attackTargetsMenu;   // guided workflow: "Choose Targets"
+    Menu attackReviewMenu;    // guided workflow: "Review Attack"
     /*#ifdef HAS_GPS
       Menu wardrivingMenu;
     #endif*/

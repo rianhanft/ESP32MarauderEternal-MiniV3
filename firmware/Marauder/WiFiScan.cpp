@@ -13481,8 +13481,15 @@ void WiFiScan::main(uint32_t currentTime)
     }
   }
   else if ((currentScanMode == WIFI_ATTACK_BEACON_LIST)) {
+    // If the guided workflow (or Select SSIDs) selected a subset, spam only those;
+    // otherwise spam the whole retained list (legacy behavior).
+    bool any_ssid_selected = false;
+    for (int i = 0; i < ssids->size(); i++) {
+      if (ssids->get(i).selected) { any_ssid_selected = true; break; }
+    }
     for (int i = 0; i < ssids->size(); i++)
-      this->broadcastCustomBeacon(currentTime, ssids->get(i));
+      if (!any_ssid_selected || ssids->get(i).selected)
+        this->broadcastCustomBeacon(currentTime, ssids->get(i));
 
     if (currentTime - initTime >= 1000)
     {
