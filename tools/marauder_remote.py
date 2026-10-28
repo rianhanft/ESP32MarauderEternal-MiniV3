@@ -164,7 +164,7 @@ MENU = [
       {"t": "Funny SSID Beacon", "c": "cy", "x": "attack -t funny"},
       {"t": "Rick Roll Beacon", "c": "yel", "x": "attack -t rickroll"},
       {"t": "Probe Req Flood", "c": "red", "x": "attack -t probe"},
-      {"t": "Evil Portal (start)", "c": "org", "x": "evilportal -c start"},
+      {"t": "Evil Portal (pick AP)", "c": "org", "pick": "ep"},
       {"t": "Deauth Flood", "c": "red", "x": "attack -t deauth"},
       {"t": "AP Clone Spam", "c": "mag", "dev": True},
       {"t": "Deauth Targeted", "c": "red", "x": "attack -t deauth"},
@@ -414,7 +414,7 @@ PAGE = r"""<!doctype html>
       const el = rowEl(n.t, "c-" + (n.c||"cy") + (dev?" dev":""),
                        sub ? "›" : (pick ? "⠿" : ""), n.ic);
       el.onclick = sub  ? () => { stack.push({title:n.t, nodes:n.m, ic:n.ic}); render(); }
-                 : pick ? () => (n.pick==="html" ? openHtmlPicker() : openPicker())
+                 : pick ? () => (n.pick==="html" ? openHtmlPicker() : openPicker(n.pick))
                  : dev  ? () => setStat("“"+n.t+"” is a device-screen feature (no remote command)")
                  : () => run(n);
       list.appendChild(el);
@@ -429,14 +429,26 @@ PAGE = r"""<!doctype html>
     return d;
   }
 
-  // ---- AP / SSID picker ----
-  function openPicker(){
-    $("#title").textContent = "Select APs";
+  // ---- AP / SSID picker ----  (mode: "ap"/"ssid" = select targets, "ep" = host Evil Portal)
+  let pickerMode = "ap";
+  function openPicker(mode){
+    pickerMode = mode || "ap";
+    $("#title").textContent = pickerMode==="ep" ? "Evil Portal: pick AP" : "Select APs";
     const list = $("#list"); list.innerHTML = "";
     const l = rowEl("Loading AP list…", "c-cy", ""); list.appendChild(l);
     fetch("/aplist" + (TOKEN ? "?t=" + encodeURIComponent(TOKEN) : ""))
       .then(r => r.json()).then(j => { picker = j.aps || []; renderPicker(); })
       .catch(() => { list.innerHTML=""; list.appendChild(rowEl("Could not read AP list.", "c-red", "")); });
+  }
+  function hostPortal(i){
+    const target = picker[i];
+    // Make ONLY this AP selected (select toggles), then start the portal.
+    const toggles = [];
+    picker.forEach((a,k)=>{ if(a.sel && k!==i) toggles.push(a.i); }); // turn others off
+    if(!target.sel) toggles.push(target.i);                           // turn this on
+    const go = () => send("evilportal -c start");
+    (toggles.length ? send("select -a " + toggles.join(",")) : Promise.resolve()).then(go);
+    setStat("Hosting Evil Portal on “" + (target.ssid||"(hidden)") + "”");
   }
   function selCsv(indices){ return indices.join(","); }
   function applySel(indices, want){
@@ -452,12 +464,24 @@ PAGE = r"""<!doctype html>
     const back = rowEl("‹ Back", "back", ""); back.onclick = () => render(); list.appendChild(back);
     // action bar
     const bar = document.createElement("div"); bar.className = "pbar";
-    bar.appendChild(mkBtn("⟳ Refresh", ()=>openPicker()));
-    bar.appendChild(mkBtn("Select ALL", ()=>applySel(picker.map((_,i)=>i), true)));
-    bar.appendChild(mkBtn("Clear ALL", ()=>applySel(picker.map((_,i)=>i), false)));
+    bar.appendChild(mkBtn("⟳ Refresh", ()=>openPicker(pickerMode)));
+    if(pickerMode!=="ep"){
+      bar.appendChild(mkBtn("Select ALL", ()=>applySel(picker.map((_,i)=>i), true)));
+      bar.appendChild(mkBtn("Clear ALL", ()=>applySel(picker.map((_,i)=>i), false)));
+    }
     list.appendChild(bar);
     if(!picker.length){
       list.appendChild(rowEl("No APs. Run WiFi ▸ Sniffers ▸ Scan, press STOP, then Refresh.", "c-org", ""));
+      return;
+    }
+    if(pickerMode==="ep"){
+      list.appendChild(lbl("Tap the AP to host the Evil Portal on"));
+      picker.forEach((a,i)=>{
+        const el = pickRow("📶  " + (a.ssid||"(hidden)"), "CH"+a.ch+"  "+a.rssi+"dBm", false);
+        el.onclick = () => hostPortal(i);
+        list.appendChild(el);
+      });
+      list.scrollTop = 0;
       return;
     }
     // group by SSID
