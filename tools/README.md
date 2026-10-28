@@ -56,14 +56,34 @@ python3 marauder_remote.py --token mysecret        # require ?t=mysecret on the 
 First do **WiFi > Sniffers > Scan APs+STAs**, press **STOP**, then open the
 picker (it runs `list -a` for you). Selections feed the attacks (deauth, etc.).
 
-## Can't open it on your phone?
+## Phone on a different network? Use a public link (`--tunnel`)
+
+On a locked-down network (apartment/campus/office Wi-Fi that puts devices on
+different subnets, or when you just want to use cellular), the same-WiFi URL
+won't work. `--tunnel` gives you a **public https link** your phone can open from
+**anywhere**:
+
+```
+brew install cloudflared          # one time (macOS; see cloudflare docs for others)
+python3 marauder_remote.py --tunnel
+```
+
+It prints an `https://<random>.trycloudflare.com/?t=<token>` link (and a QR). Open
+it on the phone over any network. Notes:
+- A **token is required and auto-generated** for tunnels, since the link is on the
+  internet. Keep the link private.
+- The link lives only while the script runs -- **Ctrl-C closes it**.
+- No Cloudflare account needed (it's a free quick tunnel).
+
+## Same-WiFi not working?
 
 The script prints **every** candidate URL on startup -- try each; the right one
 is on your phone's subnet. If none work:
-- phone + computer must be on the **same WiFi** (not a guest network, not cellular);
-- **allow Python through the firewall** (inbound TCP on the port) -- the most
-  common cause on Windows/macOS;
-- some routers block device-to-device traffic ("AP/client isolation") -- disable it.
+- phone + computer on the **same WiFi** (not a guest network, not cellular);
+- **allow Python through the firewall** (inbound TCP on the port);
+- some routers block device-to-device traffic ("AP/client isolation") -- disable it;
+- if your phone and computer got **different subnets** (e.g. `10.60.29.x` vs
+  `10.60.39.x`), the network blocks device-to-device -- use `--tunnel` instead.
 - `pip install qrcode` to also print a scannable QR of the URL.
 
 ## Notes

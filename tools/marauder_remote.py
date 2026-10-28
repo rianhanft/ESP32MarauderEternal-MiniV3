@@ -27,7 +27,10 @@ Authorized use only: this is a remote control for a tool you own.
 import argparse
 import json
 import re
+import secrets
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -549,6 +552,10 @@ def make_handler(bridge, token):
             u = urlparse(self.path)
             qs = parse_qs(u.query)
             if u.path == "/":
+                # When a token is set (always true for a public tunnel), the page
+                # itself requires it, so a bare link can't drive the Marauder.
+                if token and not self._auth_ok(qs):
+                    return self._send(403, "Add ?t=<token> to the URL.", "text/plain")
                 page = (PAGE
                         .replace("__TOKEN__", json.dumps(token or ""))
                         .replace("__MENU__", json.dumps(MENU)))
@@ -638,13 +645,47 @@ def print_qr(url):
         return False
 
 
+TUNNEL_RE = re.compile(r"https://[a-z0-9][a-z0-9-]*\.trycloudflare\.com")
+
+
+def start_tunnel(port, timeout=30):
+    """Open a free Cloudflare quick tunnel so the phone can reach the server from
+    anywhere (cellular / any network). Returns (public_url, process, error)."""
+    exe = shutil.which("cloudflared")
+    if not exe:
+        return None, None, "cloudflared not installed"
+    try:
+        proc = subprocess.Popen(
+            [exe, "tunnel", "--url", f"http://localhost:{port}", "--no-autoupdate"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    except Exception as e:
+        return None, None, f"could not launch cloudflared: {e}"
+    found = {"url": None}
+
+    def reader():
+        for line in proc.stdout:
+            m = TUNNEL_RE.search(line)
+            if m and not found["url"]:
+                found["url"] = m.group(0)
+    threading.Thread(target=reader, daemon=True).start()
+    deadline = time.time() + timeout
+    while time.time() < deadline and found["url"] is None and proc.poll() is None:
+        time.sleep(0.2)
+    if found["url"]:
+        return found["url"], proc, None
+    return None, proc, "tunnel URL not seen (cloudflared may have failed to connect)"
+
+
 def main():
     ap = argparse.ArgumentParser(description="Drive MarauderBox from your phone over WiFi.")
     ap.add_argument("--port", help="serial port (auto-detected if omitted)")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--host", default="0.0.0.0", help="bind address (default: all interfaces)")
     ap.add_argument("--http-port", type=int, default=8080)
-    ap.add_argument("--token", default="", help="optional shared secret required on the URL")
+    ap.add_argument("--token", default="", help="shared secret required on the URL")
+    ap.add_argument("--tunnel", action="store_true",
+                    help="expose a public https link (via cloudflared) reachable from "
+                         "anywhere -- phone does NOT need the same WiFi")
     ap.add_argument("--list-ports", action="store_true", help="list serial ports and exit")
     args = ap.parse_args()
 
@@ -662,36 +703,70 @@ def main():
     except Exception as e:
         sys.exit(f"Could not open {port}: {e}")
 
-    handler = make_handler(bridge, args.token)
-    httpd = ThreadingHTTPServer((args.host, args.http_port), handler)
+    # A public tunnel is internet-reachable, so always require a token there.
+    if args.tunnel and not args.token:
+        args.token = secrets.token_urlsafe(6)
 
-    ips = lan_ips()
+    httpd = ThreadingHTTPServer((args.host, args.http_port), make_handler(bridge, args.token))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
     suffix = f"?t={args.token}" if args.token else ""
-    primary = f"http://{ips[0]}:{args.http_port}/{suffix}"
+    tunnel_proc = None
     print("=" * 64)
     print("  MarauderBox Remote ready")
     print(f"  Serial : {port} @ {args.baud}    HTTP port: {args.http_port}")
-    print("  Open ONE of these on your phone (same WiFi as this computer):")
-    for ip in ips:
-        print(f"      http://{ip}:{args.http_port}/{suffix}")
-    print("")
-    if print_qr(primary):
-        print("  ^ or scan the QR above with your phone camera.")
-    else:
-        print("  (tip: `pip install qrcode` to print a scannable QR here)")
-    print("  Phone can't open it? Check all of these:")
-    print("   * phone + computer on the SAME WiFi (not a guest network, not cellular)")
-    print(f"   * allow Python through the firewall (inbound TCP {args.http_port}) -- the")
-    print("     usual cause on Windows/macOS; approve the prompt or add a rule")
-    print("   * some routers block device-to-device ('AP/client isolation') -- turn it off")
-    print("   * try each URL above; the one on your phone's subnet is the right one")
-    if not args.token:
-        print("   * no token set: anyone on this network can control it (use --token to lock)")
+
+    if args.tunnel:
+        print("  Opening a public tunnel (cloudflared)...")
+        url, tunnel_proc, err = start_tunnel(args.http_port)
+        if url:
+            public = url + "/" + suffix
+            print("")
+            print(f"  OPEN THIS ON YOUR PHONE (any network, even cellular):")
+            print(f"      {public}")
+            print("")
+            if print_qr(public):
+                print("  ^ or scan the QR above.")
+            else:
+                print("  (tip: `pip install qrcode` to print a scannable QR here)")
+            print("  This link controls your Marauder from the internet. Keep it private;")
+            print("  it stops working the moment you quit this script (Ctrl-C).")
+        else:
+            print(f"  Tunnel failed: {err}")
+            if "not installed" in (err or ""):
+                print("  Install it:  brew install cloudflared   (then re-run with --tunnel)")
+            print("  Falling back to local-network URLs below.")
+            args.tunnel = False  # show LAN info instead
+
+    if not args.tunnel:
+        ips = lan_ips()
+        primary = f"http://{ips[0]}:{args.http_port}/{suffix}"
+        print("  Open ONE of these on your phone (same WiFi as this computer):")
+        for ip in ips:
+            print(f"      http://{ip}:{args.http_port}/{suffix}")
+        print("")
+        if print_qr(primary):
+            print("  ^ or scan the QR above with your phone camera.")
+        else:
+            print("  (tip: `pip install qrcode` to print a scannable QR here)")
+        print("  Can't connect? same WiFi (not guest/cellular); allow Python through the")
+        print("  firewall; disable router AP/client isolation. On a locked-down network")
+        print("  (phone + laptop on different subnets), use --tunnel instead.")
+        if not args.token:
+            print("   (no token: anyone on this network can control it -- use --token to lock)")
     print("=" * 64)
     try:
-        httpd.serve_forever()
+        while True:
+            time.sleep(1)
+            if tunnel_proc and tunnel_proc.poll() is not None:
+                print("cloudflared exited; tunnel is down. Restart the script.")
+                break
     except KeyboardInterrupt:
         print("\nbye")
+    finally:
+        if tunnel_proc and tunnel_proc.poll() is None:
+            tunnel_proc.terminate()
+        httpd.shutdown()
 
 
 if __name__ == "__main__":
