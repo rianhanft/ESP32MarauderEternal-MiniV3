@@ -2,11 +2,22 @@
 
 Drive your MarauderBox from your phone's browser, no app and no firmware
 changes. The Marauder stays plugged into a computer by USB; this script bridges
-its serial CLI to a small web page your phone opens over WiFi.
+its serial CLI to a web page your phone opens over WiFi.
+
+The page looks and navigates like the Marauder's own screen: tap a category
+(WiFi / Bluetooth / Remote ID / GPS / Device), tap into submenus, tap an action
+to run it. ~120 commands are one tap away (ones that need an index/value prompt
+you for it), there's a free-text box for anything else, a big STOP / FORCE STOP,
+and a live serial console.
 
 ```
 [ Marauder ] --USB--> [ computer running marauder_remote.py ] <--WiFi--> [ phone browser ]
 ```
+
+**What it can and can't do:** it drives the Marauder's SERIAL command-line, so it
+covers the WiFi / Bluetooth / GPS / attack / list / device commands. The
+touch-only NyanBox screens (Device Scout, Camera Detect, Drone Remote ID views,
+Cast) have no serial command, so they can't be triggered remotely.
 
 ## Setup
 
@@ -36,10 +47,14 @@ python3 marauder_remote.py --token mysecret        # require ?t=mysecret on the 
 
 ## Notes
 
-- The big **STOP** button sends `stopscan`. Attacks like deauth/beacon-list need
-  you to `select -a <n>` (or "Select ALL APs") after a `scanall` + `list -a`.
-- The free-text box runs **any** CLI command, so you are not limited to the
-  buttons. Type `help` for the full list.
+- Navigate like the device: tap **WiFi > Attacks > Deauth**, etc. The title bar
+  shows where you are; **‹ Back** goes up a level.
+- The big **STOP** sends `stopscan` (**FORCE STOP** = `stopscan -f`). Attacks like
+  deauth / beacon-list need targets first: **WiFi > Sniffers > Scan APs+STAs**,
+  then **WiFi > Target List > Select ALL APs** (or Select AP by index).
+- Actions that need a value (an AP index, a channel, a hex color) pop a prompt.
+- The free-text box runs **any** CLI command, so you are not limited to the menu.
+  Type `help` for the device's full command list.
 - By default the server listens on all interfaces so your phone can reach it.
   Anyone on the same network can control it -- use `--token` on untrusted WiFi,
   or bind to a specific interface with `--host`.
