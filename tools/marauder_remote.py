@@ -356,6 +356,25 @@ PAGE = r"""<!doctype html>
   #log .ok{color:#ffe070;}
   #log .err{color:#ff8e8e;background:rgba(255,90,90,.08);}
   #log .dim{color:#9ab4cc;}
+  /* activity banner: what the console is actively doing */
+  .activity{display:flex;align-items:center;gap:10px;margin:11px 0;padding:11px 13px;
+    border-radius:12px;border:1px solid #1b2a38;background:#0a1016;color:#9fb4c8;
+    font-size:13px;transition:background .25s,border-color .25s,color .25s;}
+  .activity .apulse{width:10px;height:10px;border-radius:50%;background:#45506a;flex:0 0 auto;}
+  .activity .atext{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .activity .atext b{font-weight:400;opacity:.72;margin-right:5px;}
+  .activity .astop{display:none;background:#ff5a5a;color:#2a0505;border:none;border-radius:8px;
+    font-weight:800;letter-spacing:.03em;padding:6px 13px;cursor:pointer;font-size:12px;flex:0 0 auto;}
+  .activity.run{background:linear-gradient(90deg,rgba(69,224,138,.13),rgba(10,16,22,.6));
+    border-color:#2f6e55;color:#e3f7ec;}
+  .activity.atk{background:linear-gradient(90deg,rgba(255,90,90,.15),rgba(10,16,22,.6));
+    border-color:#7a2f2f;color:#ffe2e2;}
+  .activity.run .apulse{background:#45e08a;animation:apulse 1.3s ease-in-out infinite;}
+  .activity.atk .apulse{background:#ff6b6b;animation:apulse 1s ease-in-out infinite;}
+  .activity.run .astop,.activity.atk .astop{display:inline-block;}
+  .activity.shot{border-color:#2f6e8c;color:#dcefff;}
+  .activity.shot .apulse{background:#38a9ff;}
+  @keyframes apulse{0%,100%{transform:scale(1);opacity:1;}50%{transform:scale(1.55);opacity:.5;}}
   .tools{display:flex;gap:8px;align-items:center;margin-top:8px;color:#7f93a8;font-size:12px;}
   .tools button{padding:6px 10px;background:#0d1620;border:1px solid #223;border-radius:7px;
     color:#9fb4c8;font-size:12px;cursor:pointer;}
@@ -372,6 +391,11 @@ PAGE = r"""<!doctype html>
       <button class="stop alt" onclick="send('stopscan -f')">FORCE STOP</button>
     </div>
   </div>
+</div>
+<div class="activity idle" id="activity">
+  <span class="apulse"></span>
+  <span class="atext" id="atext">Idle — tap an action to begin</span>
+  <button class="astop" onclick="send('stopscan')">Stop</button>
 </div>
 <div class="console">
   <div class="cmdbar">
@@ -396,12 +420,13 @@ PAGE = r"""<!doctype html>
   const stack = [];            // breadcrumb of {title, nodes}
   let picker = null;           // AP picker state when active
 
-  function send(c){
+  function send(c, label){
     toast(c);
     appendLog("# " + c + "\n");
+    setActivity(label || c, classifyAction(c));
     return fetch("/cmd?c=" + encodeURIComponent(c) + tok())
       .then(r => { if(!r.ok) throw 0; flash(); })
-      .catch(() => setStat("send failed"));
+      .catch(() => { setStat("send failed"); failActivity(); });
   }
   function run(node){
     let c = node.x;
@@ -410,7 +435,7 @@ PAGE = r"""<!doctype html>
       if(v === null || v === "") return;
       c = c.replace("{}", v.trim());
     }
-    send(c);
+    send(c, node.t);
   }
   function sendInput(){ const i=$("#cmd"); if(i.value.trim()){ send(i.value.trim()); i.value=""; } }
   $("#cmd").addEventListener("keydown", e => { if(e.key==="Enter") sendInput(); });
@@ -418,6 +443,56 @@ PAGE = r"""<!doctype html>
   let statT;
   function setStat(s){ $("#stat").textContent=s; }
   function toast(c){ setStat("sent: " + c); clearTimeout(statT); statT=setTimeout(()=>setStat(""),2200); }
+
+  // ---- activity banner: tell the user what the console is actively doing ----
+  let shotT, curAct = {label:"", kind:"idle"};
+  function classifyAction(c){
+    const s = c.trim().toLowerCase();
+    if(/^(stopscan|reboot)\b/.test(s) || s==="recon stop"
+       || /gpstracker\s+-c\s+stop/.test(s) || /gpspoi\s+-e\b/.test(s)
+       || /remoteid\s+clear\b/.test(s)) return "stop";
+    if(/^(attack|blespam|karma|spoofat)\b/.test(s) || /evilportal\s+-c\s+start/.test(s))
+      return "atk";
+    if(/^(scanall|sniff|packetcount|mactrack|wardrive|pingscan|arpscan|portscan|recon|nmea|gpsdata|findmy)\b/.test(s)
+       || /gpstracker\s+-c\s+start/.test(s) || /gpspoi\s+-s\b/.test(s)
+       || /remoteid\s+(scan|track)\b/.test(s)) return "run";
+    return "shot";   // one-shot: select/save/load/info/join/ls/help/settings/etc.
+  }
+  function setActivity(label, kind){
+    const bar=$("#activity"), txt=$("#atext");
+    clearTimeout(shotT);
+    if(kind==="stop"){
+      curAct={label:"", kind:"idle"};
+      bar.className="activity idle";
+      txt.innerHTML = /reboot/i.test(label) ? "<b>Rebooting…</b>" : "<b>Idle —</b> stopped";
+      return;
+    }
+    if(kind==="shot"){                       // transient flash, then restore running state
+      bar.className="activity shot";
+      txt.innerHTML = "<b>Ran</b>" + esc(label);
+      shotT=setTimeout(applyActivity, 2600);
+      return;
+    }
+    curAct={label, kind};                    // run / atk are persistent
+    applyActivity();
+  }
+  function applyActivity(){
+    const bar=$("#activity"), txt=$("#atext");
+    if(curAct.kind==="idle"){
+      bar.className="activity idle";
+      txt.innerHTML = "<b>Idle —</b> tap an action to begin";
+      return;
+    }
+    bar.className = "activity " + curAct.kind;
+    txt.innerHTML = "<b>" + (curAct.kind==="atk" ? "Attacking" : "Running") + "</b>"
+                    + esc(curAct.label);
+  }
+  function failActivity(){
+    clearTimeout(shotT);
+    const bar=$("#activity"); bar.className="activity idle";
+    $("#atext").innerHTML = "<b>Send failed —</b> check the connection";
+  }
+  function esc(s){ const d=document.createElement("div"); d.textContent=String(s); return d.innerHTML; }
 
   function render(){
     picker = null;
@@ -465,7 +540,7 @@ PAGE = r"""<!doctype html>
     const toggles = [];
     picker.forEach((a,k)=>{ if(a.sel && k!==i) toggles.push(a.i); }); // turn others off
     if(!target.sel) toggles.push(target.i);                           // turn this on
-    const go = () => send("evilportal -c start");
+    const go = () => send("evilportal -c start", "Evil Portal on “" + (target.ssid||"(hidden)") + "”");
     (toggles.length ? send("select -a " + toggles.join(",")) : Promise.resolve()).then(go);
     setStat("Hosting Evil Portal on “" + (target.ssid||"(hidden)") + "”");
   }
