@@ -68,6 +68,19 @@ brew install cloudflared          # one time (macOS; see cloudflare docs for oth
 python3 marauder_remote.py --tunnel
 ```
 
+**No Homebrew?** Download the `cloudflared` binary straight into the folder with
+the script (the tool looks for it there -- no install, no PATH):
+
+```
+# macOS, run in the folder that has marauder_remote.py:
+A=$([ "$(uname -m)" = arm64 ] && echo arm64 || echo amd64)
+curl -L -o cloudflared.tgz \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-$A.tgz
+tar -xzf cloudflared.tgz && chmod +x cloudflared && rm cloudflared.tgz
+python3 marauder_remote.py --tunnel
+```
+(or point the tool at a binary anywhere with `--cloudflared /path/to/cloudflared`).
+
 It prints an `https://<random>.trycloudflare.com/?t=<token>` link (and a QR). Open
 it on the phone over any network. Notes:
 - A **token is required and auto-generated** for tunnels, since the link is on the

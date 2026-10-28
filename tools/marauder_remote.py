@@ -26,6 +26,7 @@ Authorized use only: this is a remote control for a tool you own.
 """
 import argparse
 import json
+import os
 import re
 import secrets
 import shutil
@@ -648,12 +649,35 @@ def print_qr(url):
 TUNNEL_RE = re.compile(r"https://[a-z0-9][a-z0-9-]*\.trycloudflare\.com")
 
 
-def start_tunnel(port, timeout=30):
+def find_cloudflared(explicit=None):
+    """Locate the cloudflared binary: an explicit --cloudflared path, then PATH,
+    then next to the script or in the current folder (so you can just drop the
+    downloaded binary beside marauder_remote.py -- no PATH/install needed)."""
+    import os
+    if explicit:
+        return explicit if os.path.isfile(explicit) else shutil.which(explicit)
+    w = shutil.which("cloudflared")
+    if w:
+        return w
+    here = os.path.dirname(os.path.abspath(__file__))
+    for base in (os.getcwd(), here):
+        for name in ("cloudflared", "cloudflared.exe"):
+            p = os.path.join(base, name)
+            if os.path.isfile(p):
+                return p
+    return None
+
+
+def start_tunnel(port, timeout=30, exe=None):
     """Open a free Cloudflare quick tunnel so the phone can reach the server from
     anywhere (cellular / any network). Returns (public_url, process, error)."""
-    exe = shutil.which("cloudflared")
+    exe = find_cloudflared(exe)
     if not exe:
-        return None, None, "cloudflared not installed"
+        return None, None, "cloudflared not found"
+    try:
+        os.chmod(exe, 0o755)  # in case the downloaded binary isn't executable yet
+    except Exception:
+        pass
     try:
         proc = subprocess.Popen(
             [exe, "tunnel", "--url", f"http://localhost:{port}", "--no-autoupdate"],
@@ -686,6 +710,9 @@ def main():
     ap.add_argument("--tunnel", action="store_true",
                     help="expose a public https link (via cloudflared) reachable from "
                          "anywhere -- phone does NOT need the same WiFi")
+    ap.add_argument("--cloudflared", default="",
+                    help="path to the cloudflared binary (otherwise found on PATH or "
+                         "next to this script)")
     ap.add_argument("--list-ports", action="store_true", help="list serial ports and exit")
     args = ap.parse_args()
 
@@ -718,7 +745,7 @@ def main():
 
     if args.tunnel:
         print("  Opening a public tunnel (cloudflared)...")
-        url, tunnel_proc, err = start_tunnel(args.http_port)
+        url, tunnel_proc, err = start_tunnel(args.http_port, exe=args.cloudflared or None)
         if url:
             public = url + "/" + suffix
             print("")
@@ -733,8 +760,13 @@ def main():
             print("  it stops working the moment you quit this script (Ctrl-C).")
         else:
             print(f"  Tunnel failed: {err}")
-            if "not installed" in (err or ""):
-                print("  Install it:  brew install cloudflared   (then re-run with --tunnel)")
+            if "not found" in (err or ""):
+                print("  cloudflared isn't here. No Homebrew needed -- download it next to")
+                print("  this script (one time), then re-run with --tunnel:")
+                print('    A=$([ "$(uname -m)" = arm64 ] && echo arm64 || echo amd64)')
+                print("    curl -L -o cloudflared.tgz \\")
+                print("      https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-$A.tgz")
+                print("    tar -xzf cloudflared.tgz && chmod +x cloudflared && rm cloudflared.tgz")
             print("  Falling back to local-network URLs below.")
             args.tunnel = False  # show LAN info instead
 
