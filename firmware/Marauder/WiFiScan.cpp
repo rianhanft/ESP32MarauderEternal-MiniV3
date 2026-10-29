@@ -7027,17 +7027,30 @@ void WiFiScan::displayWardriveStats() {
 
 // Function to start running a beacon scan
 void WiFiScan::RunBeaconScan(uint8_t scan_mode, uint16_t color) {
-  // Undo any Bluetooth coex bias a prior BT scan set, so WiFi RX is not starved
-  // (wardrive runs both radios, so balanced is also correct here).
-  esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
-  // Free a BLE device list left by a long Bluetooth sniff before WiFi init (see
-  // RunAPScan): it fragments the internal DMA heap and can make the scan find no
-  // APs. For wardrive this just gives a fresh BLE list, which it repopulates.
   #ifdef HAS_BT
+    // Shared-radio handoff. A plain AP scan must FULLY release the BLE side first:
+    // after a long Bluetooth sniff NimBLE keeps the 2.4GHz radio and, under coex
+    // BALANCE, starves WiFi RX so the scan sweeps channels but receives nothing
+    // (seen with plenty of RAM free -- it is radio contention, not memory). Deinit
+    // the BLE controller and hand the radio to WiFi. Wardrive is the exception: it
+    // runs both radios (RunBluetoothScan set BLE up just before), so it stays
+    // balanced and keeps NimBLE.
+    if (scan_mode == WIFI_SCAN_AP) {
+      if (NimBLEDevice::isInitialized())
+        NimBLEDevice::deinit(true);
+      esp_coex_preference_set(ESP_COEX_PREFER_WIFI);
+    } else {
+      esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+    }
+    // Free a BLE device list left by a long Bluetooth sniff before WiFi init: it
+    // fragments the internal DMA heap and can make the scan find no APs. For
+    // wardrive this just gives a fresh BLE list, which it repopulates.
     if (ble_devices && ble_devices->size() > 0) {
       delete ble_devices;
       ble_devices = new LinkedList<BleDevice>();
     }
+  #else
+    esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
   #endif
   // Start every AP/wardrive scan from a FRESH access-point list. Without this the
   // list (and each AP's station sublist, which is heap-allocated) accumulated
