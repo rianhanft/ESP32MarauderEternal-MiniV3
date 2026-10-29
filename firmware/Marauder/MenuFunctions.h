@@ -233,6 +233,7 @@ class MenuFunctions
     void beginAttackPlan(const String& name, uint8_t color, AttackScope scope,
                          std::function<void()> launch);
     void buildAttackTargets();              // "Choose Targets" (AP / SSID multi-select)
+    void buildAttackSsidSelect();           // "Select by SSID": add every AP of one SSID
     void buildAttackStationProfile(int apIndex);  // per-AP station mode + station picks
     void buildAttackReview();               // "Review Attack" (+ conditional Start)
     uint16_t attackTargetCount() const;     // # selected APs / SSIDs for the plan
@@ -289,6 +290,7 @@ class MenuFunctions
     Menu attackTargetsMenu;   // guided workflow: "Choose Targets"
     Menu attackReviewMenu;    // guided workflow: "Review Attack"
     Menu attackStationMenu;   // guided workflow: per-AP station profile
+    Menu attackSsidMenu;      // guided workflow: "Select by SSID"
     /*#ifdef HAS_GPS
       Menu wardrivingMenu;
     #endif*/
