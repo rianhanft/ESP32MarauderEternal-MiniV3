@@ -4973,9 +4973,23 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
       this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this]() {
         this->changeMenu(wifiAttackMenu.parentMenu, true);
       });
-      // Beacon Spam List -> pick retained SSIDs
+      // Beacon Spam List -> pick scanned APs, spam copies of their SSIDs. (The
+      // retained-SSID list is empty unless you add SSIDs, which is why nothing
+      // showed; this sources targets from the APs you actually scanned.)
       this->addNodes(menu, text_table1[50], TFTRED, BEACON_LIST, [this]() {
-        this->beginAttackPlan(text_table1[50], TFTRED, AttackScope::SSID_LIST, [this]() {
+        this->beginAttackPlan(text_table1[50], TFTRED, AttackScope::AP, [this]() {
+          // Rebuild the beacon-spam SSID list from the selected scanned APs.
+          while (ssids->size() > 0) ssids->remove(0);
+          for (int i = 0; i < access_points->size(); i++) {
+            if (access_points->get(i).selected) {
+              ssid s;
+              s.essid = access_points->get(i).essid;
+              s.channel = access_points->get(i).channel;
+              memcpy(s.bssid, access_points->get(i).bssid, 6);
+              s.selected = true;
+              ssids->add(s);
+            }
+          }
           display_obj.clearScreen(); this->drawStatusBar();
           wifi_scan_obj.StartScan(WIFI_ATTACK_BEACON_LIST, TFT_RED);
         });
@@ -5001,9 +5015,10 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
           wifi_scan_obj.StartScan(WIFI_ATTACK_RICK_ROLL, TFT_YELLOW);
         });
       });
-      // Probe Req Flood -> targetless
+      // Probe Req Flood -> AP-targeted (sendProbeAttack only fires on SELECTED
+      // APs, so it needs an AP picked -- it was doing nothing as "targetless").
       this->addNodes(menu, text_table1[53], TFTRED, PROBE_SNIFF, [this]() {
-        this->beginAttackPlan(text_table1[53], TFTRED, AttackScope::TARGETLESS, [this]() {
+        this->beginAttackPlan(text_table1[53], TFTRED, AttackScope::AP, [this]() {
           display_obj.clearScreen(); this->drawStatusBar();
           wifi_scan_obj.StartScan(WIFI_ATTACK_AUTH, TFT_RED);
         });
@@ -5085,9 +5100,10 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
           wifi_scan_obj.StartScan(WIFI_ATTACK_AP_SPAM, TFT_MAGENTA);
         });
       });
-      // Deauth Targeted -> AP-targeted
+      // Deauth Targeted -> per-AP station targeting (deauths SELECTED stations,
+      // so it needs the station-selection screen, not just AP select).
       this->addNodes(menu, text_table1[62], TFTRED, DEAUTH_SNIFF, [this]() {
-        this->beginAttackPlan(text_table1[62], TFTRED, AttackScope::AP, [this]() {
+        this->beginAttackPlan(text_table1[62], TFTRED, AttackScope::AP_STATIONS, [this]() {
           display_obj.clearScreen(); this->drawStatusBar();
           wifi_scan_obj.StartScan(WIFI_ATTACK_DEAUTH_TARGETED, TFT_ORANGE);
         });
@@ -5135,7 +5151,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         });
       });
       this->addNodes(menu, "Bad Msg Targeted", TFTYELLOW, DEAUTH_SNIFF, [this]() {
-        this->beginAttackPlan("Bad Msg Targeted", TFTYELLOW, AttackScope::AP, [this]() {
+        this->beginAttackPlan("Bad Msg Targeted", TFTYELLOW, AttackScope::AP_STATIONS, [this]() {
           display_obj.clearScreen(); this->drawStatusBar();
           wifi_scan_obj.StartScan(WIFI_ATTACK_BAD_MSG_TARGETED, TFT_YELLOW);
         });
@@ -5148,7 +5164,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         });
       });
       this->addNodes(menu, "Assoc Sleep Targ", TFTMAGENTA, DEAUTH_SNIFF, [this]() {
-        this->beginAttackPlan("Assoc Sleep Targ", TFTMAGENTA, AttackScope::AP, [this]() {
+        this->beginAttackPlan("Assoc Sleep Targ", TFTMAGENTA, AttackScope::AP_STATIONS, [this]() {
           display_obj.clearScreen(); this->drawStatusBar();
           wifi_scan_obj.StartScan(WIFI_ATTACK_SLEEP_TARGETED, TFT_MAGENTA);
         });
