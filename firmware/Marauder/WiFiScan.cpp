@@ -2283,8 +2283,17 @@ void WiFiScan::applyScanHeapPolicy(uint8_t scan_mode) {
   // especially after a long scan or an Evil Portal session. Keeping init at the
   // stock policy and only routing the per-AP list data to PSRAM fixes both.
   this->list_in_psram = false;
-  if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) == 0)
-    return;  // no usable PSRAM -> leave the stock allocator untouched
+  // Guard on PSRAM PRESENCE, not free space. When PSRAM is merely FULL (e.g. a
+  // previous AP scan / wardrive left its list there), largest-free-block is also
+  // 0, and the old early-return skipped the reset below -- leaving the extmem
+  // threshold at whatever a prior AP scan set it to (16 = route *everything*,
+  // including the next scan's Wi-Fi init allocations, to the already-full PSRAM).
+  // That driver then comes up unable to receive: the scan sweeps channels but
+  // never adds anything ("rescan finds nothing"), and it stays broken until a
+  // reboot. Resetting the threshold is a cheap config write that never
+  // allocates, so always do it whenever PSRAM hardware exists.
+  if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0)
+    return;  // no PSRAM hardware -> leave the stock allocator untouched
   heap_caps_malloc_extmem_enable(4096);  // stock C5 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL
 #endif
 }

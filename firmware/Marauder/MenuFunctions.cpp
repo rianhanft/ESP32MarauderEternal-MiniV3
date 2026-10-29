@@ -2044,6 +2044,10 @@ void MenuFunctions::buildFoxTargetList(FoxHuntListKind type, int context_ap) {
   Menu* menu = type == FoxHuntListKind::STATION_TARGETS ? &wifiStationMenu : &wifiAPMenu;
   menu->list->clear();
   menu->parentMenu = type == FoxHuntListKind::STATION_TARGETS ? &wifiAPMenu : &foxHuntMenu;
+  // Build this (scan-scaled) target list in PSRAM, not the internal (DMA) heap,
+  // so a long AP/station/BLE list does not starve the memory Wi-Fi/BLE need.
+  // Paired with endExtmemAlloc() before changeMenu() (rendering needs DMA memory).
+  wifi_scan_obj.beginExtmemAlloc();
   this->addNodes(menu, text09, TFTLIGHTGREY, 0, [this, menu]() { this->changeMenu(menu->parentMenu, true); });
   String sort_row = "Sort: " + String(foxSortLabel());
   this->addNodes(menu, sort_row.c_str(), TFTCYAN, 255, [this]() { buildFoxSortMenu(); });
@@ -2197,6 +2201,7 @@ void MenuFunctions::buildFoxTargetList(FoxHuntListKind type, int context_ap) {
                                 ? BT_SCAN_FOX_HUNT : WIFI_SCAN_SIG_STREN, TFT_CYAN);
     });
   }
+  wifi_scan_obj.endExtmemAlloc();   // restore DMA-capable allocator before render
   this->changeMenu(menu, true);
 }
 
@@ -5616,6 +5621,12 @@ void MenuFunctions::buildAttackTargets() {
   m->name = "Choose Targets";
   m->parentMenu = &wifiAttackMenu;
 
+  // Build the per-AP/SSID rows in PSRAM, not the internal (DMA) heap: this list
+  // grows one node per scanned AP, and leaving it on the internal heap starves
+  // the memory the Wi-Fi driver/softAP/TFT need (see Evil Portal picker). Paired
+  // with endExtmemAlloc() before changeMenu(), since rendering needs DMA memory.
+  wifi_scan_obj.beginExtmemAlloc();
+
   const bool stationScope = (attack_plan.scope == AttackScope::AP_STATIONS);
   const bool apScope = (attack_plan.scope == AttackScope::AP) || stationScope;
 
@@ -5689,6 +5700,7 @@ void MenuFunctions::buildAttackTargets() {
     }
   }
 
+  wifi_scan_obj.endExtmemAlloc();   // restore DMA-capable allocator before render
   this->changeMenu(m, true);
 }
 
@@ -5701,6 +5713,7 @@ void MenuFunctions::buildAttackSsidSelect() {
   m->name = "Select by SSID";
   m->parentMenu = &attackTargetsMenu;
 
+  wifi_scan_obj.beginExtmemAlloc();   // one node per distinct SSID -> keep off DMA heap
   this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() { this->buildAttackTargets(); });
 
   int shown = 0;
@@ -5736,6 +5749,7 @@ void MenuFunctions::buildAttackSsidSelect() {
   if (shown == 0)
     this->addNodes(m, "(no named SSIDs - run a scan)", TFTDARKGREY, 255, []() {});
 
+  wifi_scan_obj.endExtmemAlloc();
   this->changeMenu(m, true);
 }
 
@@ -5750,6 +5764,7 @@ void MenuFunctions::buildAttackStationProfile(int apIndex) {
   m->name = screenName(ap.essid) + " [" + ap.stations->size() + "]";
   m->parentMenu = &attackTargetsMenu;
 
+  wifi_scan_obj.beginExtmemAlloc();   // one node per station -> keep off DMA heap
   this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() { this->buildAttackTargets(); });
 
   // Mode shortcuts.
@@ -5799,6 +5814,7 @@ void MenuFunctions::buildAttackStationProfile(int apIndex) {
 
   this->addNodes(m, "Done", attack_plan.color, ATTACKS, [this]() { this->buildAttackTargets(); });
 
+  wifi_scan_obj.endExtmemAlloc();
   this->changeMenu(m, true);
 }
 
@@ -5810,6 +5826,7 @@ void MenuFunctions::buildAttackReview() {
   m->name = "Review Attack";
   m->parentMenu = &wifiAttackMenu;
 
+  wifi_scan_obj.beginExtmemAlloc();   // per-AP summary lines -> keep off DMA heap
   this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() {
     if (attack_plan.reopenTargets) attack_plan.reopenTargets();
     else this->changeMenu(&wifiAttackMenu, true);
@@ -5871,6 +5888,7 @@ void MenuFunctions::buildAttackReview() {
     });
   }
 
+  wifi_scan_obj.endExtmemAlloc();
   this->changeMenu(m, true);
 }
 
