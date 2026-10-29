@@ -5015,6 +5015,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         attack_plan.scope = AttackScope::SSID_ONE;
         attack_plan.oneSsid = "";
         attack_plan.oneApIndex = -1;
+        attack_plan.needsHtml = true;   // Evil Portal needs a captive-page HTML
         attack_plan.launch = [this]() {
           if (evil_portal_obj.setAP(attack_plan.oneSsid)) {
             // Preserve the legacy AP-branch side effects when hosting on a scanned AP.
@@ -5096,6 +5097,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         attack_plan.scope = AttackScope::SSID_ONE;
         attack_plan.oneSsid = "";
         attack_plan.oneApIndex = -1;
+        attack_plan.needsHtml = false;  // Karma does not host a captive page
         attack_plan.launch = [this]() {
           if (evil_portal_obj.setAP(attack_plan.oneSsid)) {
             display_obj.clearScreen();
@@ -5573,6 +5575,7 @@ void MenuFunctions::beginAttackPlan(const String& name, uint8_t color,
   attack_plan.scope = scope;
   attack_plan.oneSsid = "";
   attack_plan.oneApIndex = -1;
+  attack_plan.needsHtml = false;
   attack_plan.launch = launch;
 
   if (scope == AttackScope::TARGETLESS) {
@@ -5607,7 +5610,10 @@ bool MenuFunctions::attackPlanValid() const {
     // Beacon List spams the whole retained list when nothing is selected, so the
     // only requirement is that at least one SSID has been retained.
     case AttackScope::SSID_LIST:  return ssids->size() > 0;
-    case AttackScope::SSID_ONE:   return attack_plan.oneSsid.length() > 0;
+    // Evil Portal also needs a captive-page HTML chosen (setHtml() requires an SD
+    // file); Karma just needs the probe SSID.
+    case AttackScope::SSID_ONE:   return attack_plan.oneSsid.length() > 0 &&
+        (!attack_plan.needsHtml || evil_portal_obj.target_html_name.length() > 0);
   }
   return false;
 }
@@ -5753,6 +5759,37 @@ void MenuFunctions::buildAttackSsidSelect() {
   this->changeMenu(m, true);
 }
 
+// Evil Portal: pick the captive-page HTML from the SD card (same source as
+// General > Select EP HTML File) and return to Review with it applied. Evil
+// Portal cannot start without one (setHtml() needs a real /<name> on the SD).
+void MenuFunctions::buildAttackHtmlSelect() {
+  Menu* m = &htmlMenu;
+  m->list->clear();
+  m->name = "Select HTML";
+  m->parentMenu = &attackReviewMenu;
+
+  wifi_scan_obj.beginExtmemAlloc();
+  this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() { this->buildAttackReview(); });
+
+  const int count = evil_portal_obj.html_files->size();
+  for (int i = 0; i < count; i++) {
+    const String name = evil_portal_obj.html_files->get(i);
+    const bool cur = (name == evil_portal_obj.target_html_name);
+    const String label = String(cur ? "[x] " : "[ ] ") + name;
+    this->addNodes(m, label.c_str(), cur ? TFTGREEN : TFTCYAN, 255, [this, i]() {
+      evil_portal_obj.selected_html_index = i;
+      evil_portal_obj.target_html_name = evil_portal_obj.html_files->get(i);
+      evil_portal_obj.using_serial_html = false;
+      this->buildAttackReview();
+    });
+  }
+  if (count == 0)
+    this->addNodes(m, "(no .html on SD card)", TFTDARKGREY, 255, []() {});
+
+  wifi_scan_obj.endExtmemAlloc();
+  this->changeMenu(m, true);
+}
+
 // Per-AP station profile screen: choose how this AP is hit (All Stations /
 // Broadcast / specific stations) and toggle individual clients. Each AP keeps
 // its own mode via the shared selected flags, so one plan can mix modes.
@@ -5876,6 +5913,17 @@ void MenuFunctions::buildAttackReview() {
         profileText = "Profile:"; break;
     }
     this->addNodes(m, profileText.c_str(), TFTLIGHTGREY, 255, []() {});
+  }
+
+  // Evil Portal: show the chosen captive-page HTML and let the user pick one.
+  if (attack_plan.scope == AttackScope::SSID_ONE && attack_plan.needsHtml) {
+    const bool hasHtml = evil_portal_obj.target_html_name.length() > 0;
+    const String htmlLine = String("HTML: ") +
+        (hasHtml ? screenName(evil_portal_obj.target_html_name) : String("(none - pick one)"));
+    this->addNodes(m, htmlLine.c_str(), hasHtml ? TFTLIGHTGREY : TFTRED, 255, []() {});
+    this->addNodes(m, "Select HTML File", TFTCYAN, KEYBOARD_ICO, [this]() {
+      this->buildAttackHtmlSelect();
+    });
   }
 
   if (this->attackPlanValid()) {

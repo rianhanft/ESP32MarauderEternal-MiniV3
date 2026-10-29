@@ -225,6 +225,7 @@ class MenuFunctions
       AttackScope scope = AttackScope::TARGETLESS;
       String oneSsid;                       // chosen SSID for SSID_ONE
       int oneApIndex = -1;                  // chosen scanned-AP index for Evil Portal (-1 = SSID)
+      bool needsHtml = false;               // Evil Portal: a captive-page HTML must be chosen
       std::function<void()> launch;         // performs the real StartScan (legacy path)
       std::function<void()> reopenTargets;  // re-enter the target step from Review
     };
@@ -234,6 +235,7 @@ class MenuFunctions
                          std::function<void()> launch);
     void buildAttackTargets();              // "Choose Targets" (AP / SSID multi-select)
     void buildAttackSsidSelect();           // "Select by SSID": add every AP of one SSID
+    void buildAttackHtmlSelect();           // Evil Portal: pick the captive-page HTML file
     void buildAttackStationProfile(int apIndex);  // per-AP station mode + station picks
     void buildAttackReview();               // "Review Attack" (+ conditional Start)
     uint16_t attackTargetCount() const;     // # selected APs / SSIDs for the plan
