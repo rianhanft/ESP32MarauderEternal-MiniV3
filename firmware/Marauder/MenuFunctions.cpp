@@ -5068,12 +5068,14 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         };
         attack_plan.reopenTargets();
       });
-      // Deauth Flood -> per-AP station profiles (All / Pick / Broadcast per AP)
+      // Deauth Flood -> classic behavior: pick APs, broadcast-deauth them all.
+      // (Per-AP station targeting lives in "Deauth Targeted".) Kept as a plain AP
+      // pick + Review so deauthing many APs/SSIDs works exactly like before the
+      // guided-workflow changes -- no per-AP station screen, station_profile off.
       this->addNodes(menu, text_table1[54], TFTRED, DEAUTH_SNIFF, [this]() {
-        this->beginAttackPlan(text_table1[54], TFTRED, AttackScope::AP_STATIONS, [this]() {
+        this->beginAttackPlan(text_table1[54], TFTRED, AttackScope::AP, [this]() {
           display_obj.clearScreen(); this->drawStatusBar();
           wifi_scan_obj.StartScan(WIFI_ATTACK_DEAUTH, TFT_RED);
-          wifi_scan_obj.station_profile = true;
         });
       });
       // AP Clone Spam -> AP-targeted

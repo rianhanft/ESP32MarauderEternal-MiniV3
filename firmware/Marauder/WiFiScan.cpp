@@ -7524,6 +7524,18 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
       esp_coex_preference_set(ESP_COEX_PREFER_BT);
 
     pBLEScan = NimBLEDevice::getScan(); //create new scan
+
+    #ifdef HAS_PSRAM
+      // Route the BLE device list and its per-advertisement churn to PSRAM so a
+      // long sniff does not fragment the internal (DMA) heap. That fragmentation
+      // left the NEXT WiFi/AP scan unable to get a contiguous init buffer, so Scan
+      // AP found nothing even with RAM free (seen: D:59% P:0%). NimBLE's init ran
+      // above on the stock allocator; the threshold is reset by the next
+      // StartScan's applyScanHeapPolicy(). Mirrors enableApListPsram() for APs.
+      if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) > 0)
+        heap_caps_malloc_extmem_enable(16);
+    #endif
+
     if ((scan_mode == BT_SCAN_ALL) ||
         (scan_mode == BT_SCAN_IBEACON) ||
         (scan_mode == BT_SCAN_FOX_HUNT) ||
