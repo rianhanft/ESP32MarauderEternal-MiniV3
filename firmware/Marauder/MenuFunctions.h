@@ -214,9 +214,10 @@ class MenuFunctions
     // keeps its legacy selected-list behavior.
     enum class AttackScope : uint8_t {
       TARGETLESS,   // Random / Funny / Rick Roll / Probe flood - no retained list
-      AP,           // AP-targeted (Deauth, CSA, Quiet, SAE, AP spam, Bad Msg, ...)
+      AP,           // AP-targeted (CSA, Quiet, SAE, AP spam, targeted variants)
       SSID_LIST,    // Beacon Spam List - retained user SSIDs
       SSID_ONE,     // Evil Portal / Karma - one explicit SSID
+      AP_STATIONS,  // Deauth / Bad Msg / Assoc Sleep - per-AP station profiles
     };
     struct AttackPlan {
       String name;                          // display name shown on Review
@@ -232,6 +233,7 @@ class MenuFunctions
     void beginAttackPlan(const String& name, uint8_t color, AttackScope scope,
                          std::function<void()> launch);
     void buildAttackTargets();              // "Choose Targets" (AP / SSID multi-select)
+    void buildAttackStationProfile(int apIndex);  // per-AP station mode + station picks
     void buildAttackReview();               // "Review Attack" (+ conditional Start)
     uint16_t attackTargetCount() const;     // # selected APs / SSIDs for the plan
     bool attackPlanValid() const;
@@ -286,6 +288,7 @@ class MenuFunctions
     Menu wifiAttackMenu;
     Menu attackTargetsMenu;   // guided workflow: "Choose Targets"
     Menu attackReviewMenu;    // guided workflow: "Review Attack"
+    Menu attackStationMenu;   // guided workflow: per-AP station profile
     /*#ifdef HAS_GPS
       Menu wardrivingMenu;
     #endif*/

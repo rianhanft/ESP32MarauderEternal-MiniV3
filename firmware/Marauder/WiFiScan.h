@@ -1084,6 +1084,14 @@ class WiFiScan
     String dst_mac = "ff:ff:ff:ff:ff:ff";
     byte src_mac[6] = {};
 
+    // Guided-workflow per-AP station profiles (Deauth/Bad Msg/Assoc Sleep).
+    // Set true only by the on-device guided launch; the serial `attack` command
+    // leaves it false so those modes keep their legacy selected-list behavior.
+    // When true, each selected AP is handled by its own station mode: selected
+    // stations are targeted individually; an AP with no selected stations is hit
+    // broadly (broadcast deauth, or all clients for Bad Msg / Assoc Sleep).
+    bool station_profile = false;
+
     #ifdef HAS_SCREEN
       #if !defined(MARAUDER_CARDPUTER) && !defined(MARAUDER_CARDPUTER_ADV)
         int16_t _analyzer_values[TFT_WIDTH];

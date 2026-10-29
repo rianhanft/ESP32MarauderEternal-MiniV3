@@ -2306,6 +2306,7 @@ void MenuFunctions::RunSetup()
   // Guided attack workflow screens (built on demand by the workflow helpers).
   attackTargetsMenu.list = new LinkedList<MenuNode>();
   attackReviewMenu.list = new LinkedList<MenuNode>();
+  attackStationMenu.list = new LinkedList<MenuNode>();
 
   // WiFi HTML menu stuff
   htmlMenu.list = new LinkedList<MenuNode>();
@@ -5060,11 +5061,12 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         };
         attack_plan.reopenTargets();
       });
-      // Deauth Flood -> AP-targeted
+      // Deauth Flood -> per-AP station profiles (All / Pick / Broadcast per AP)
       this->addNodes(menu, text_table1[54], TFTRED, DEAUTH_SNIFF, [this]() {
-        this->beginAttackPlan(text_table1[54], TFTRED, AttackScope::AP, [this]() {
+        this->beginAttackPlan(text_table1[54], TFTRED, AttackScope::AP_STATIONS, [this]() {
           display_obj.clearScreen(); this->drawStatusBar();
           wifi_scan_obj.StartScan(WIFI_ATTACK_DEAUTH, TFT_RED);
+          wifi_scan_obj.station_profile = true;
         });
       });
       // AP Clone Spam -> AP-targeted
@@ -5116,9 +5118,10 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
       });
       // Bad Msg -> AP-targeted (per-AP station profiles arrive in Stage 2)
       this->addNodes(menu, "Bad Msg", TFTRED, DEAUTH_SNIFF, [this]() {
-        this->beginAttackPlan("Bad Msg", TFTRED, AttackScope::AP, [this]() {
+        this->beginAttackPlan("Bad Msg", TFTRED, AttackScope::AP_STATIONS, [this]() {
           display_obj.clearScreen(); this->drawStatusBar();
           wifi_scan_obj.StartScan(WIFI_ATTACK_BAD_MSG, TFT_RED);
+          wifi_scan_obj.station_profile = true;
         });
       });
       this->addNodes(menu, "Bad Msg Targeted", TFTYELLOW, DEAUTH_SNIFF, [this]() {
@@ -5128,9 +5131,10 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         });
       });
       this->addNodes(menu, "Assoc Sleep", TFTRED, DEAUTH_SNIFF, [this]() {
-        this->beginAttackPlan("Assoc Sleep", TFTRED, AttackScope::AP, [this]() {
+        this->beginAttackPlan("Assoc Sleep", TFTRED, AttackScope::AP_STATIONS, [this]() {
           display_obj.clearScreen(); this->drawStatusBar();
           wifi_scan_obj.StartScan(WIFI_ATTACK_SLEEP, TFT_RED);
+          wifi_scan_obj.station_profile = true;
         });
       });
       this->addNodes(menu, "Assoc Sleep Targ", TFTMAGENTA, DEAUTH_SNIFF, [this]() {
@@ -5578,7 +5582,8 @@ void MenuFunctions::beginAttackPlan(const String& name, uint8_t color,
 
 uint16_t MenuFunctions::attackTargetCount() const {
   uint16_t n = 0;
-  if (attack_plan.scope == AttackScope::AP) {
+  if (attack_plan.scope == AttackScope::AP ||
+      attack_plan.scope == AttackScope::AP_STATIONS) {
     for (int i = 0; i < access_points->size(); i++)
       if (access_points->get(i).selected) n++;
   } else if (attack_plan.scope == AttackScope::SSID_LIST) {
@@ -5592,6 +5597,7 @@ bool MenuFunctions::attackPlanValid() const {
   switch (attack_plan.scope) {
     case AttackScope::TARGETLESS: return true;
     case AttackScope::AP:         return attackTargetCount() > 0;
+    case AttackScope::AP_STATIONS: return attackTargetCount() > 0;
     // Beacon List spams the whole retained list when nothing is selected, so the
     // only requirement is that at least one SSID has been retained.
     case AttackScope::SSID_LIST:  return ssids->size() > 0;
@@ -5609,7 +5615,8 @@ void MenuFunctions::buildAttackTargets() {
   m->name = "Choose Targets";
   m->parentMenu = &wifiAttackMenu;
 
-  const bool apScope = (attack_plan.scope == AttackScope::AP);
+  const bool stationScope = (attack_plan.scope == AttackScope::AP_STATIONS);
+  const bool apScope = (attack_plan.scope == AttackScope::AP) || stationScope;
 
   this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() {
     this->changeMenu(&wifiAttackMenu, true);
@@ -5626,10 +5633,16 @@ void MenuFunctions::buildAttackTargets() {
     }
     this->buildAttackTargets();
   });
-  this->addNodes(m, "Clear All", TFTORANGE, 255, [this, apScope]() {
+  this->addNodes(m, "Clear All", TFTORANGE, 255, [this, apScope, stationScope]() {
     if (apScope) {
       for (int i = 0; i < access_points->size(); i++) {
         AccessPoint a = access_points->get(i); a.selected = false; access_points->set(i, a);
+        if (stationScope) {
+          for (int x = 0; x < a.stations->size(); x++) {
+            Station st = stations->get(a.stations->get(x)); st.selected = false;
+            stations->set(a.stations->get(x), st);
+          }
+        }
       }
     } else {
       for (int i = 0; i < ssids->size(); i++) {
@@ -5639,7 +5652,27 @@ void MenuFunctions::buildAttackTargets() {
     this->buildAttackTargets();
   });
 
-  if (apScope) {
+  if (stationScope) {
+    // Per-AP station profiles: tapping an AP opens its station-mode screen, so
+    // different APs can carry different modes (All / Pick / Broadcast) in one plan.
+    for (int i = 0; i < access_points->size(); i++) {
+      AccessPoint ap = access_points->get(i);
+      const bool sel = ap.selected;
+      const int total = ap.stations->size();
+      int selSta = 0;
+      for (int x = 0; x < total; x++)
+        if (stations->get(ap.stations->get(x)).selected) selSta++;
+      String mark;
+      if (!sel)                            mark = "[ ] ";
+      else if (total == 0 || selSta == 0)  mark = "[Bcast] ";
+      else if (selSta == total)            mark = "[All] ";
+      else                                 mark = String("[Pick ") + selSta + "] ";
+      const String label = mark + screenName(ap.essid);
+      this->addNodes(m, label.c_str(), sel ? TFTCYAN : TFTLIGHTGREY, 255, [this, i]() {
+        this->buildAttackStationProfile(i);
+      });
+    }
+  } else if (apScope) {
     for (int i = 0; i < access_points->size(); i++) {
       const bool sel = access_points->get(i).selected;
       const String label = String(sel ? "[x] " : "[ ] ") + screenName(access_points->get(i).essid);
@@ -5667,6 +5700,69 @@ void MenuFunctions::buildAttackTargets() {
   this->changeMenu(m, true);
 }
 
+// Per-AP station profile screen: choose how this AP is hit (All Stations /
+// Broadcast / specific stations) and toggle individual clients. Each AP keeps
+// its own mode via the shared selected flags, so one plan can mix modes.
+void MenuFunctions::buildAttackStationProfile(int apIndex) {
+  if (apIndex < 0 || apIndex >= access_points->size()) { this->buildAttackTargets(); return; }
+  Menu* m = &attackStationMenu;
+  m->list->clear();
+  AccessPoint ap = access_points->get(apIndex);
+  m->name = screenName(ap.essid);
+  m->parentMenu = &attackTargetsMenu;
+
+  this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() { this->buildAttackTargets(); });
+
+  // Mode shortcuts.
+  this->addNodes(m, "All Stations", TFTGREEN, 255, [this, apIndex]() {
+    AccessPoint a = access_points->get(apIndex); a.selected = true; access_points->set(apIndex, a);
+    for (int x = 0; x < a.stations->size(); x++) {
+      Station st = stations->get(a.stations->get(x)); st.selected = true;
+      stations->set(a.stations->get(x), st);
+    }
+    this->buildAttackStationProfile(apIndex);
+  });
+  this->addNodes(m, "Broadcast (no clients)", TFTORANGE, 255, [this, apIndex]() {
+    AccessPoint a = access_points->get(apIndex); a.selected = true; access_points->set(apIndex, a);
+    for (int x = 0; x < a.stations->size(); x++) {
+      Station st = stations->get(a.stations->get(x)); st.selected = false;
+      stations->set(a.stations->get(x), st);
+    }
+    this->buildAttackStationProfile(apIndex);
+  });
+  this->addNodes(m, "Remove from plan", TFTRED, 255, [this, apIndex]() {
+    AccessPoint a = access_points->get(apIndex); a.selected = false; access_points->set(apIndex, a);
+    for (int x = 0; x < a.stations->size(); x++) {
+      Station st = stations->get(a.stations->get(x)); st.selected = false;
+      stations->set(a.stations->get(x), st);
+    }
+    this->buildAttackTargets();
+  });
+
+  // Individual clients. Tapping one puts this AP in the plan and selects it.
+  const int total = ap.stations->size();
+  if (total == 0) {
+    this->addNodes(m, "(no clients seen - broadcast)", TFTDARKGREY, 255, []() {});
+  } else {
+    for (int x = 0; x < total; x++) {
+      const int staIdx = ap.stations->get(x);
+      const bool sel = stations->get(staIdx).selected;
+      const String label = String(sel ? "[x] " : "[ ] ") +
+                           screenMac(macToString(stations->get(staIdx).mac));
+      this->addNodes(m, label.c_str(), sel ? TFTCYAN : TFTLIGHTGREY, 255,
+                     [this, apIndex, staIdx]() {
+        Station st = stations->get(staIdx); st.selected = !st.selected; stations->set(staIdx, st);
+        AccessPoint a = access_points->get(apIndex); a.selected = true; access_points->set(apIndex, a);
+        this->buildAttackStationProfile(apIndex);
+      });
+    }
+  }
+
+  this->addNodes(m, "Done", attack_plan.color, ATTACKS, [this]() { this->buildAttackTargets(); });
+
+  this->changeMenu(m, true);
+}
+
 // "Review Attack": the authoritative screen. Shows attack / scope / profile as
 // non-interactive rows and offers "Start Attack" only when the plan validates.
 void MenuFunctions::buildAttackReview() {
@@ -5684,10 +5780,11 @@ void MenuFunctions::buildAttackReview() {
 
   String scopeText;
   switch (attack_plan.scope) {
-    case AttackScope::TARGETLESS: scopeText = "Scope: Targetless"; break;
-    case AttackScope::AP:         scopeText = "Scope: Access points"; break;
-    case AttackScope::SSID_LIST:  scopeText = "Scope: Retained SSIDs"; break;
-    case AttackScope::SSID_ONE:   scopeText = "Scope: One SSID"; break;
+    case AttackScope::TARGETLESS:  scopeText = "Scope: Targetless"; break;
+    case AttackScope::AP:          scopeText = "Scope: Access points"; break;
+    case AttackScope::AP_STATIONS: scopeText = "Scope: APs + stations"; break;
+    case AttackScope::SSID_LIST:   scopeText = "Scope: Retained SSIDs"; break;
+    case AttackScope::SSID_ONE:    scopeText = "Scope: One SSID"; break;
   }
   this->addNodes(m, scopeText.c_str(), TFTLIGHTGREY, 255, []() {});
 
@@ -5697,6 +5794,21 @@ void MenuFunctions::buildAttackReview() {
       profileText = "Profile: none needed"; break;
     case AttackScope::AP:
       profileText = String("Profile: ") + attackTargetCount() + " AP(s)"; break;
+    case AttackScope::AP_STATIONS: {
+      uint16_t aps = 0, sta = 0, bcast = 0;
+      for (int i = 0; i < access_points->size(); i++) {
+        AccessPoint ap = access_points->get(i);
+        if (!ap.selected) continue;
+        aps++;
+        int selSta = 0;
+        for (int x = 0; x < ap.stations->size(); x++)
+          if (stations->get(ap.stations->get(x)).selected) selSta++;
+        sta += selSta;
+        if (selSta == 0) bcast++;
+      }
+      profileText = String("Profile: ") + aps + " AP, " + sta + " sta, " + bcast + " bcast";
+      break;
+    }
     case AttackScope::SSID_LIST: {
       const uint16_t sel = attackTargetCount();
       profileText = sel ? (String("Profile: ") + sel + " of " + ssids->size() + " SSIDs")
