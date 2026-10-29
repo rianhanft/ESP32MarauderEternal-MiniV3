@@ -5607,9 +5607,10 @@ bool MenuFunctions::attackPlanValid() const {
     case AttackScope::TARGETLESS: return true;
     case AttackScope::AP:         return attackTargetCount() > 0;
     case AttackScope::AP_STATIONS: return attackTargetCount() > 0;
-    // Beacon List spams the whole retained list when nothing is selected, so the
-    // only requirement is that at least one SSID has been retained.
-    case AttackScope::SSID_LIST:  return ssids->size() > 0;
+    // Beacon List always offers Start (matching the legacy behavior): it spams the
+    // retained SSID list, or the selected subset. With no retained SSIDs it simply
+    // broadcasts nothing until some are added, so don't hide the button.
+    case AttackScope::SSID_LIST:  return true;
     // Evil Portal also needs a captive-page HTML chosen (setHtml() requires an SD
     // file); Karma just needs the probe SSID.
     case AttackScope::SSID_ONE:   return attack_plan.oneSsid.length() > 0 &&
@@ -5901,8 +5902,11 @@ void MenuFunctions::buildAttackReview() {
         profileText = String("Profile: ") + attackTargetCount() + " AP(s)"; break;
       case AttackScope::SSID_LIST: {
         const uint16_t sel = attackTargetCount();
-        profileText = sel ? (String("Profile: ") + sel + " of " + ssids->size() + " SSIDs")
-                          : (String("Profile: all ") + ssids->size() + " SSIDs");
+        if (ssids->size() == 0)
+          profileText = "Profile: no SSIDs (Add SSIDs first)";
+        else
+          profileText = sel ? (String("Profile: ") + sel + " of " + ssids->size() + " SSIDs")
+                            : (String("Profile: all ") + ssids->size() + " SSIDs");
         break;
       }
       case AttackScope::SSID_ONE:

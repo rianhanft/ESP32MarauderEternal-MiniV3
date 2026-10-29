@@ -2352,6 +2352,10 @@ int WiFiScan::clearList(uint8_t list_type) {
 
   if (list_type == CLEAR_APS) {
     num_cleared = access_points->size();
+    for (int i = 0; i < access_points->size(); i++) {
+      LinkedList<uint16_t>* st = access_points->get(i).stations;
+      if (st) delete st;   // free each AP's heap-allocated station sublist
+    }
     while (access_points->size() > 0)
       access_points->remove(0);
     return num_cleared;
@@ -7035,6 +7039,20 @@ void WiFiScan::RunBeaconScan(uint8_t scan_mode, uint16_t color) {
       ble_devices = new LinkedList<BleDevice>();
     }
   #endif
+  // Start every AP/wardrive scan from a FRESH access-point list. Without this the
+  // list (and each AP's station sublist, which is heap-allocated) accumulated
+  // across every scan until PSRAM/internal RAM was exhausted and the scan stopped
+  // finding/propagating APs. Free each station sublist first (remove() alone
+  // leaks them), then swap in a new list; also drop the now-orphaned stations.
+  if (access_points) {
+    for (int i = 0; i < access_points->size(); i++) {
+      LinkedList<uint16_t>* st = access_points->get(i).stations;
+      if (st) delete st;
+    }
+    delete access_points;
+    access_points = new LinkedList<AccessPoint>();
+  }
+  if (stations) stations->clear();
   if (scan_mode == WIFI_SCAN_AP)
     startPcap("beacon");
   else if (scan_mode == WIFI_SCAN_WAR_DRIVE) {
@@ -7416,8 +7434,21 @@ void WiFiScan::RunBluetoothScan(uint8_t scan_mode, uint16_t color) {
     // so it detects nothing. Freeing it here gives the BLE controller room. The
     // list is rebuilt by the next AP scan; nothing that needs it runs in between.
     if (access_points && access_points->size() > 0) {
+      for (int i = 0; i < access_points->size(); i++) {
+        LinkedList<uint16_t>* st = access_points->get(i).stations;
+        if (st) delete st;   // remove()/delete-list alone leaks these sublists
+      }
       delete access_points;
       access_points = new LinkedList<AccessPoint>();
+      if (stations) stations->clear();
+    }
+
+    // Start each Bluetooth scan from a FRESH device list so repeated BLE scans do
+    // not accumulate until NimBLE is starved and detects nothing. The scanner
+    // repopulates it; nothing that needs the old list runs between scans.
+    if (ble_devices && ble_devices->size() > 0) {
+      delete ble_devices;
+      ble_devices = new LinkedList<BleDevice>();
     }
 
     // Shared-radio coexistence: before bringing BLE up, make sure the WiFi side
