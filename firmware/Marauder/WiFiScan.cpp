@@ -11837,7 +11837,8 @@ void WiFiScan::renderRawStats() {
     display_obj.tft.println("   Deauth: " + (String)this->deauth_frames);
     display_obj.tft.println("    EAPOL: " + (String)this->eapol_frames);
     if ((this->currentScanMode == WIFI_SCAN_EAPOL) ||
-        (this->currentScanMode == WIFI_SCAN_ACTIVE_EAPOL)) {
+        (this->currentScanMode == WIFI_SCAN_ACTIVE_EAPOL) ||
+        (this->currentScanMode == WIFI_SCAN_ACTIVE_LIST_EAPOL)) {
       display_obj.tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
       display_obj.tft.println("Complete EAPOL: " + (String)this->getCompleteEapol());
       display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -11862,7 +11863,8 @@ void WiFiScan::renderRawStats() {
   Serial.println("   Deauth: " + (String)this->deauth_frames);
   Serial.println("    EAPOL: " + (String)this->eapol_frames);
   if ((this->currentScanMode == WIFI_SCAN_EAPOL) ||
-      (this->currentScanMode == WIFI_SCAN_ACTIVE_EAPOL)) {
+      (this->currentScanMode == WIFI_SCAN_ACTIVE_EAPOL) ||
+      (this->currentScanMode == WIFI_SCAN_ACTIVE_LIST_EAPOL)) {
     Serial.println("Complete EAPOL: " + (String)this->getCompleteEapol());
   }
   Serial.println("     RSSI: " + (String)this->min_rssi + " - " + (String)this->max_rssi);
@@ -11913,7 +11915,8 @@ void WiFiScan::packetRateLoop(uint32_t tick) {
       this->renderPacketRate();
     else if ((this->currentScanMode == WIFI_SCAN_RAW_CAPTURE) ||
             (this->currentScanMode == WIFI_SCAN_EAPOL) ||
-            (this->currentScanMode == WIFI_SCAN_ACTIVE_EAPOL))
+            (this->currentScanMode == WIFI_SCAN_ACTIVE_EAPOL) ||
+            (this->currentScanMode == WIFI_SCAN_ACTIVE_LIST_EAPOL))
       this->renderRawStats();
 
   }
