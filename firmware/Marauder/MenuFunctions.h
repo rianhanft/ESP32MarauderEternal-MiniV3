@@ -230,9 +230,13 @@ class MenuFunctions
       std::function<void()> reopenTargets;  // re-enter the target step from Review
     };
     AttackPlan attack_plan;
+    // Menu the guided workflow returns to (Back / after launch). Defaults to the
+    // WiFi Attacks menu, but e.g. the EAPOL/PMKID scan sets it to the Sniffers
+    // menu so it does not dump the user into Attacks.
+    Menu* attack_origin_menu = nullptr;
 
     void beginAttackPlan(const String& name, uint8_t color, AttackScope scope,
-                         std::function<void()> launch);
+                         std::function<void()> launch, Menu* origin = nullptr);
     void buildAttackTargets();              // "Choose Targets" (AP / SSID multi-select)
     void buildAttackSsidSelect();           // "Select by SSID": add every AP of one SSID
     void buildAttackHtmlSelect();           // Evil Portal: pick the captive-page HTML file

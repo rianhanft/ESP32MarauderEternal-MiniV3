@@ -4859,18 +4859,28 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
       });
       #ifdef HAS_ILI9341
         this->addNodes(menu, text_table1[46], TFTVIOLET, EAPOL, [this]() {
-          display_obj.clearScreen();
-          this->drawStatusBar();
-          wifi_scan_obj.StartScan(WIFI_SCAN_EAPOL, TFT_VIOLET);
+          // Pick target APs (or Select by SSID) first, then run the TARGETED
+          // active EAPOL/PMKID scan: it channel-hops only the selected APs and
+          // deauths them to force PMKID. Back returns to Sniffers, not Attacks.
+          this->beginAttackPlan(text_table1[46], TFTVIOLET, AttackScope::AP, [this]() {
+            display_obj.clearScreen();
+            this->drawStatusBar();
+            wifi_scan_obj.StartScan(WIFI_SCAN_ACTIVE_LIST_EAPOL, TFT_VIOLET);
+          }, &wifiSnifferMenu);
         });
         this->addNodes(menu, text_table1[45], TFTBLUE, PACKET_MONITOR, [this]() {
           wifi_scan_obj.StartScan(WIFI_PACKET_MONITOR, TFT_BLUE);
         });
       #else
         this->addNodes(menu, text_table1[46], TFTVIOLET, EAPOL, [this]() {
-          display_obj.clearScreen();
-          this->drawStatusBar();
-          wifi_scan_obj.StartScan(WIFI_SCAN_EAPOL, TFT_VIOLET);
+          // Pick target APs (or Select by SSID) first, then run the TARGETED
+          // active EAPOL/PMKID scan: it channel-hops only the selected APs and
+          // deauths them to force PMKID. Back returns to Sniffers, not Attacks.
+          this->beginAttackPlan(text_table1[46], TFTVIOLET, AttackScope::AP, [this]() {
+            display_obj.clearScreen();
+            this->drawStatusBar();
+            wifi_scan_obj.StartScan(WIFI_SCAN_ACTIVE_LIST_EAPOL, TFT_VIOLET);
+          }, &wifiSnifferMenu);
         });
         this->addNodes(menu, text_table1[45], TFTBLUE, PACKET_MONITOR, [this]() {
           display_obj.clearScreen();
@@ -5025,6 +5035,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
       });
       // Evil Portal -> pick one SSID/AP, then review. Keeps the existing picker.
       this->addNodes(menu, "Evil Portal", TFTORANGE, BEACON_SNIFF, [this]() {
+        attack_origin_menu = &wifiAttackMenu;
         attack_plan.name = "Evil Portal";
         attack_plan.color = TFTORANGE;
         attack_plan.scope = AttackScope::SSID_ONE;
@@ -5110,6 +5121,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
       });
       // Karma -> pick one probe SSID, then review. Keeps the existing picker.
       this->addNodes(menu, "Karma", TFTORANGE, KEYBOARD_ICO, [this]() {
+        attack_origin_menu = &wifiAttackMenu;
         attack_plan.name = "Karma";
         attack_plan.color = TFTORANGE;
         attack_plan.scope = AttackScope::SSID_ONE;
@@ -5587,7 +5599,8 @@ void MenuFunctions::confirmAction(const char* title, Menu* returnMenu,
 // exact existing launch behavior; the workflow only gates it behind target
 // selection and the authoritative Review screen.
 void MenuFunctions::beginAttackPlan(const String& name, uint8_t color,
-                                    AttackScope scope, std::function<void()> launch) {
+                                    AttackScope scope, std::function<void()> launch,
+                                    Menu* origin) {
   attack_plan.name = name;
   attack_plan.color = color;
   attack_plan.scope = scope;
@@ -5595,9 +5608,10 @@ void MenuFunctions::beginAttackPlan(const String& name, uint8_t color,
   attack_plan.oneApIndex = -1;
   attack_plan.needsHtml = false;
   attack_plan.launch = launch;
+  attack_origin_menu = origin ? origin : &wifiAttackMenu;
 
   if (scope == AttackScope::TARGETLESS) {
-    attack_plan.reopenTargets = [this]() { this->changeMenu(&wifiAttackMenu, true); };
+    attack_plan.reopenTargets = [this]() { this->changeMenu(attack_origin_menu, true); };
     this->buildAttackReview();
   } else {
     // AP / SSID_LIST targets are collected by buildAttackTargets. SSID_ONE attacks
@@ -5644,7 +5658,7 @@ void MenuFunctions::buildAttackTargets() {
   Menu* m = &attackTargetsMenu;
   m->list->clear();
   m->name = "Choose Targets";
-  m->parentMenu = &wifiAttackMenu;
+  m->parentMenu = attack_origin_menu ? attack_origin_menu : &wifiAttackMenu;
 
   // Build the per-AP/SSID rows in PSRAM, not the internal (DMA) heap: this list
   // grows one node per scanned AP, and leaving it on the internal heap starves
@@ -5658,7 +5672,7 @@ void MenuFunctions::buildAttackTargets() {
   // Header actions, laid out like the official firmware: Back, Review/Continue,
   // Clear Profile, then (our addition) Select by SSID.
   this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() {
-    this->changeMenu(&wifiAttackMenu, true);
+    this->changeMenu(attack_origin_menu ? attack_origin_menu : &wifiAttackMenu, true);
   });
   this->addNodes(m, "Review / Continue", TFTGREEN, ATTACKS, [this]() {
     this->buildAttackReview();
@@ -5880,12 +5894,12 @@ void MenuFunctions::buildAttackReview() {
   Menu* m = &attackReviewMenu;
   m->list->clear();
   m->name = "Review Attack";
-  m->parentMenu = &wifiAttackMenu;
+  m->parentMenu = attack_origin_menu ? attack_origin_menu : &wifiAttackMenu;
 
   wifi_scan_obj.beginExtmemAlloc();   // per-AP summary lines -> keep off DMA heap
   this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() {
     if (attack_plan.reopenTargets) attack_plan.reopenTargets();
-    else this->changeMenu(&wifiAttackMenu, true);
+    else this->changeMenu(attack_origin_menu ? attack_origin_menu : &wifiAttackMenu, true);
   });
 
   this->addNodes(m, (String("Attack: ") + attack_plan.name).c_str(), TFTGREEN, 255, []() {});
