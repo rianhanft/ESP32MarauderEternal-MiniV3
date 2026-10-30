@@ -860,7 +860,7 @@ class WiFiScan
     void sendProbeAttack(uint32_t currentTime);
     void sendBadMsgAttack(uint32_t currentTime, bool all = false);
     void sendAssocSleepAttack(uint32_t currentTime, bool all = false);
-    void sendDeauthFrame(uint8_t bssid[6], int channel, uint8_t mac[6]);
+    void sendDeauthFrame(uint8_t bssid[6], int channel, uint8_t mac[6], bool switch_channel = true);
     // Ported from Marauder Eternal: Camera Deauther (internal helpers).
     void sendCameraDeauthFrame(WiFiCameraDetector::DeauthLink& link);
     void drawCameraDeauthStatus();

