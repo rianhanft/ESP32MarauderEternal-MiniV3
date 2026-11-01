@@ -39,7 +39,23 @@ namespace {
 
 constexpr uint8_t CHANNEL_COUNT = 11;
 constexpr uint16_t CHANNEL_DWELL_MS = 500;
-constexpr uint8_t BASELINE_SWEEPS = 3;
+constexpr uint8_t BASELINE_SWEEPS = 4;
+
+// Anomaly thresholds. A live dwell must clear BOTH a multiple of the channel
+// baseline AND an absolute margin before it counts as a frame hit, so ordinary
+// beacon/probe traffic on a channel that was quiet during calibration can no
+// longer trip the alarm on its own. A hit then has to repeat on STRIKE_ON
+// separate visits to that channel before the alarm latches; an overwhelming
+// surge latches on the first visit.
+constexpr uint16_t ACTIVITY_MULTIPLIER = 3;
+constexpr uint16_t ACTIVITY_FLOOR = 60;
+constexpr uint16_t SURGE_MULTIPLIER = 6;
+constexpr uint16_t SURGE_FLOOR = 300;
+constexpr int16_t NOISE_DELTA_DB = 10;
+constexpr uint16_t NOISE_MIN_FRAMES = 10;
+constexpr uint32_t BLE_MULTIPLIER = 3;
+constexpr uint32_t BLE_FLOOR = 25;
+constexpr uint8_t STRIKE_ON = 2;
 
 struct ChannelSample {
   uint16_t frames;
@@ -199,12 +215,11 @@ void drawBaseline(uint8_t sweeps, uint32_t elapsed) {
 void drawDetector(const ChannelSample samples[CHANNEL_COUNT],
                   const uint16_t baselineFrames[CHANNEL_COUNT],
                   const int8_t baselineNoise[CHANNEL_COUNT],
-                  uint32_t bleRate, uint32_t baselineBleRate) {
+                  uint32_t bleRate, uint32_t baselineBleRate,
+                  bool activityAlert, bool noiseAlert, bool bleAlert) {
   uint8_t worstChannel = 1;
   uint16_t worstScore = 0;
   int16_t noiseDelta = 0;
-  bool activityAlert = false;
-  bool noiseAlert = false;
   for (uint8_t index = 0; index < CHANNEL_COUNT; index++) {
     const uint16_t base = max<uint16_t>(1, baselineFrames[index]);
     const uint16_t ratio = min<uint32_t>(999,
@@ -220,9 +235,6 @@ void drawDetector(const ChannelSample samples[CHANNEL_COUNT],
     }
   }
   const uint8_t index = worstChannel - 1;
-  activityAlert = samples[index].frames > baselineFrames[index] * 3 + 8;
-  noiseAlert = noiseDelta >= 8 && samples[index].frames >= 3;
-  const bool bleAlert = bleRate > baselineBleRate * 3 + 5;
   const bool alert = activityAlert || noiseAlert || bleAlert;
 
   display_obj.tft.fillScreen(TFT_BLACK);
@@ -315,6 +327,10 @@ void runTool(bool detector) {
   uint32_t lastBleAt = millis();
   uint32_t nextHop = millis() + CHANNEL_DWELL_MS;
   uint32_t nextDraw = 0;
+  uint8_t frameStrikes[CHANNEL_COUNT]{};
+  uint8_t noiseStrikes[CHANNEL_COUNT]{};
+  uint8_t bleStrikes = 0;
+  uint16_t graceDwells = 0;
 
   while (true) {
     if (c_btn.justPressed())
@@ -332,6 +348,10 @@ void runTool(bool detector) {
       baselineStarted = millis();
       baselineBleStart = copyBleCount();
       lastBleCount = baselineBleStart;
+      memset(frameStrikes, 0, sizeof(frameStrikes));
+      memset(noiseStrikes, 0, sizeof(noiseStrikes));
+      bleStrikes = 0;
+      graceDwells = 0;
     }
 
     const uint32_t now = millis();
@@ -359,20 +379,56 @@ void runTool(bool detector) {
               (now - baselineStarted) / 1000);
           baselineBleRate = (copyBleCount() - baselineBleStart) / elapsedSeconds;
           baselineReady = true;
+          graceDwells = CHANNEL_COUNT;
+          memset(frameStrikes, 0, sizeof(frameStrikes));
+          memset(noiseStrikes, 0, sizeof(noiseStrikes));
+          bleStrikes = 0;
         }
       }
       else if (detector && baselineReady) {
-        const bool activityAlert = samples[completed].frames >
-            baselineFrames[completed] * 3 + 8;
-        const bool noiseAlert = samples[completed].noiseFloor > -127 &&
-            baselineNoise[completed] > -127 &&
-            samples[completed].noiseFloor - baselineNoise[completed] >= 8;
-        if (!activityAlert && !noiseAlert) {
-          baselineFrames[completed] =
-              (baselineFrames[completed] * 15 + samples[completed].frames) / 16;
-          if (samples[completed].noiseFloor > -127)
-            baselineNoise[completed] =
-                (baselineNoise[completed] * 15 + samples[completed].noiseFloor) / 16;
+        const ChannelSample& live = samples[completed];
+        if (graceDwells > 0) {
+          // First live sweep after calibration: pull up any channel whose short
+          // baseline undercounted its real beacon load, and hold the alarm off
+          // so a fresh, realistic baseline is in place before detection arms.
+          if (live.frames > baselineFrames[completed])
+            baselineFrames[completed] = live.frames;
+          if (live.noiseFloor > -127 && live.noiseFloor > baselineNoise[completed])
+            baselineNoise[completed] = live.noiseFloor;
+          frameStrikes[completed] = 0;
+          noiseStrikes[completed] = 0;
+          graceDwells--;
+        } else {
+          const uint32_t base = baselineFrames[completed];
+          const bool frameHit = live.frames >
+              base * ACTIVITY_MULTIPLIER + ACTIVITY_FLOOR;
+          const bool frameSurge = live.frames >
+              base * SURGE_MULTIPLIER + SURGE_FLOOR;
+          if (frameSurge)
+            frameStrikes[completed] = STRIKE_ON;
+          else if (frameHit)
+            frameStrikes[completed] =
+                min<uint8_t>(frameStrikes[completed] + 1, STRIKE_ON + 1);
+          else
+            frameStrikes[completed] = 0;
+
+          const bool noiseHit = live.noiseFloor > -127 &&
+              baselineNoise[completed] > -127 &&
+              live.frames >= NOISE_MIN_FRAMES &&
+              live.noiseFloor - baselineNoise[completed] >= NOISE_DELTA_DB;
+          noiseStrikes[completed] = noiseHit ?
+              min<uint8_t>(noiseStrikes[completed] + 1, STRIKE_ON + 1) : 0;
+
+          // Let a calm channel drift so the baseline tracks the room over time,
+          // but never fold a hit into it (that would train the detector to treat
+          // an ongoing jam as the new normal).
+          if (!frameHit && !noiseHit) {
+            baselineFrames[completed] =
+                (baselineFrames[completed] * 15 + live.frames) / 16;
+            if (live.noiseFloor > -127)
+              baselineNoise[completed] =
+                  (baselineNoise[completed] * 15 + live.noiseFloor) / 16;
+          }
         }
       }
       esp_wifi_set_channel(activeChannel, WIFI_SECOND_CHAN_NONE);
@@ -384,14 +440,28 @@ void runTool(bool detector) {
       bleRate = (current - lastBleCount) * 1000 / max<uint32_t>(1, now - lastBleAt);
       lastBleCount = current;
       lastBleAt = now;
+      if (detector && baselineReady && graceDwells == 0) {
+        const bool bleHit = bleRate > baselineBleRate * BLE_MULTIPLIER + BLE_FLOOR;
+        bleStrikes = bleHit ? min<uint8_t>(bleStrikes + 1, STRIKE_ON + 1) : 0;
+      } else {
+        bleStrikes = 0;
+      }
     }
     if (usable && static_cast<int32_t>(now - nextDraw) >= 0) {
       nextDraw = now + 500;
       if (detector && !baselineReady)
         drawBaseline(baselineSweeps, now - baselineStarted);
-      else if (detector)
+      else if (detector) {
+        bool activityAlert = false;
+        bool noiseAlert = false;
+        for (uint8_t ch = 0; ch < CHANNEL_COUNT; ch++) {
+          if (frameStrikes[ch] >= STRIKE_ON) activityAlert = true;
+          if (noiseStrikes[ch] >= STRIKE_ON) noiseAlert = true;
+        }
+        const bool bleAlert = bleStrikes >= STRIKE_ON;
         drawDetector(samples, baselineFrames, baselineNoise, bleRate,
-                     baselineBleRate);
+                     baselineBleRate, activityAlert, noiseAlert, bleAlert);
+      }
       else
         drawScanner(samples, bleRate);
     }
