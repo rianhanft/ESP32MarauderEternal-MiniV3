@@ -338,8 +338,21 @@ void setup()
     digitalWrite(ACT_LED_PIN, LOW);
   #endif
 
-  while(!Serial)
-    delay(10);
+  #ifdef HAS_T_DONGLE_DISPLAY
+    // Headless native-USB dongle: never block boot waiting for a USB host.
+    // Its USB-Serial-JTAG only reports "connected" when the host opens the port
+    // with DTR asserted; waiting forever here means no display, no CLI, and no
+    // operation at all when powered from a battery/charger. Give the host a
+    // brief chance to attach, then continue no matter what.
+    {
+      uint32_t _serial_wait_start = millis();
+      while (!Serial && (millis() - _serial_wait_start) < 1500)
+        delay(10);
+    }
+  #else
+    while(!Serial)
+      delay(10);
+  #endif
 
   #ifdef HAS_C5_SD
     sharedSPI.begin(SD_SCK, SD_MISO, SD_MOSI);
