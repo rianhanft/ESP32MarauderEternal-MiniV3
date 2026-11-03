@@ -27,8 +27,10 @@ case "${BOARD}" in
             FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled" ;;
   MINI_V3)  FLAG="MARAUDER_MINI_V3"; TFT="User_Setup_marauder_mini_v3.h";
             FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled" ;;
+  # Native-USB dongle: no UART bridge, so Serial must ride the built-in USB
+  # (CDCOnBoot=cdc) for the CLI / web remote to reach it over the USB-A plug.
   TDONGLE_C5) FLAG="MARAUDER_T_DONGLE_C5"; TFT="User_Setup_t_dongle_c5.h";
-            FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled" ;;
+            FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,CDCOnBoot=cdc" ;;
   *) echo "Unknown board '${BOARD}'. Use PANCAKE|V8|MINI_V3|WS_C5_35|TDONGLE_C5." >&2; exit 2 ;;
 esac
 
