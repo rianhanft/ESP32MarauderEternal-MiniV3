@@ -29,7 +29,10 @@ struct DeauthTarget {
 // recognizable camera-brand SSIDs, and clients of fingerprinted hidden Eufy
 // HomeBase networks. It does not transmit or claim that a match proves the
 // device's role.
-void run();
+// fromSerial = launched over the serial CLI (web remote): stream the candidate
+// list to Serial every ~2s and exit on any serial input (web Stop). On-device
+// launches pass false and behave exactly as before.
+void run(bool fromSerial = false);
 
 // Passively discovers camera candidates and asks the operator to select either
 // one candidate or all link-ready candidates of the same detected brand, then

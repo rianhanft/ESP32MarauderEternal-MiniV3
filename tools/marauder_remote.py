@@ -263,14 +263,19 @@ MENU = [
     {"t": "GPS POI End", "c": "red", "x": "gpspoi -e"},
   ]},
   {"t": "NyanBox", "c": "mag", "ic": "\U0001F431", "m": [
+    # These open an interactive screen ON THE DEVICE and also stream a live
+    # status feed to this web console. Tap Stop (or the device center button) to
+    # exit. The on-screen view (graph/radar/list) is only visible on the device.
     {"t": "Sniffers", "c": "yel", "ic": "\U0001F3A7", "m": [
-      {"t": "Device Scout", "c": "grn", "dev": True},
-      {"t": "Jam Detector", "c": "red", "dev": True},
-      {"t": "Camera Detect", "c": "cy", "dev": True},
+      {"t": "Device Scout", "c": "grn", "x": "devicescout"},
+      {"t": "Jam Detector", "c": "red", "x": "jamdetector"},
+      {"t": "Camera Detect", "c": "cy", "x": "cameradetect"},
+      {"t": "RF Activity Scanner", "c": "lime", "x": "rfscanner"},
       {"t": "Drone Remote ID Scan", "c": "org", "x": "remoteid scan"},
       {"t": "Drone Remote ID List", "c": "cy", "x": "remoteid list"},
       {"t": "Drone Track (idx)", "c": "mag", "x": "remoteid track {}", "p": "drone index"},
       {"t": "Drone Remote ID Clear", "c": "red", "x": "remoteid clear"},
+      {"t": "Stop", "c": "red", "x": "stopscan"},
     ]},
     {"t": "Attacks", "c": "red", "ic": "\U0001F4A5", "m": [
       {"t": "Camera Deauther", "c": "red", "dev": True},
@@ -278,12 +283,14 @@ MENU = [
       {"t": "Drone Spoof (SD)", "c": "red", "dev": True},
     ]},
     {"t": "BLE Detectors", "c": "cy", "ic": "\U0001F535", "m": [
-      {"t": "Meshtastic Sniff", "c": "grn", "dev": True},
-      {"t": "MeshCore Sniff", "c": "cy", "dev": True},
-      {"t": "SmartTag Sniff", "c": "yel", "dev": True},
-      {"t": "Tile Sniff", "c": "org", "dev": True},
-      {"t": "Axon Sniff", "c": "red", "dev": True},
-      {"t": "NyanBOX Sniff", "c": "mag", "dev": True},
+      {"t": "Meshtastic Sniff", "c": "grn", "x": "nyanble -t meshtastic"},
+      {"t": "MeshCore Sniff", "c": "cy", "x": "nyanble -t meshcore"},
+      {"t": "SmartTag Sniff", "c": "yel", "x": "nyanble -t smarttag"},
+      {"t": "Tile Sniff", "c": "org", "x": "nyanble -t tile"},
+      {"t": "Axon Sniff", "c": "red", "x": "nyanble -t axon"},
+      {"t": "iBeacon Sniff", "c": "cy", "x": "nyanble -t ibeacon"},
+      {"t": "NyanBOX Sniff", "c": "mag", "x": "nyanble -t nyanbox"},
+      {"t": "Stop", "c": "red", "x": "stopscan"},
     ]},
   ]},
   {"t": "Device", "c": "blu", "ic": "⚙", "m": [
@@ -492,7 +499,7 @@ PAGE = r"""<!doctype html>
        || /remoteid\s+clear\b/.test(s)) return "stop";
     if(/^(attack|blespam|karma|spoofat)\b/.test(s) || /evilportal\s+-c\s+start/.test(s))
       return "atk";
-    if(/^(scanall|sniff|packetcount|mactrack|wardrive|pingscan|arpscan|portscan|recon|nmea|gpsdata|findmy)\b/.test(s)
+    if(/^(scanall|sniff|packetcount|mactrack|wardrive|pingscan|arpscan|portscan|recon|nmea|gpsdata|findmy|devicescout|cameradetect|jamdetector|rfscanner|nyanble)\b/.test(s)
        || /gpstracker\s+-c\s+start/.test(s) || /gpspoi\s+-s\b/.test(s)
        || /remoteid\s+(scan|track)\b/.test(s)) return "run";
     return "shot";   // one-shot: select/save/load/info/join/ls/help/settings/etc.

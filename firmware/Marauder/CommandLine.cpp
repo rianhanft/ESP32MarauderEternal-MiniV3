@@ -1,5 +1,12 @@
 #include "CommandLine.h"
 
+// NyanBox device-screen tools, launchable over serial for the web remote.
+// Each header provides no-op stubs when its board features are disabled.
+#include "WirelessDeviceScout.h"
+#include "WiFiCameraDetector.h"
+#include "WirelessActivityTools.h"
+#include "BLEDeviceDetectors.h"
+
 // GCOVR_EXCL_START -- serial protocol output depends on Arduino Serial.
 namespace {
   bool parseFiniteNumber(const String& value, double& parsed) {
@@ -321,6 +328,11 @@ void CommandLine::runCommand(String input) {
     #if defined(HAS_CSI_MOTION)
       Serial.println(HELP_CSI_MOTION_CMD);
     #endif
+    Serial.println(HELP_DEVICE_SCOUT_CMD);
+    Serial.println(HELP_CAMERA_DETECT_CMD);
+    Serial.println(HELP_JAM_DETECT_CMD);
+    Serial.println(HELP_RF_SCANNER_CMD);
+    Serial.println(HELP_NYAN_BLE_CMD);
     Serial.println(HELP_STOPSCAN_CMD);
     #ifdef HAS_GPS
       Serial.println(HELP_WARDRIVE_CMD);
@@ -1011,6 +1023,53 @@ void CommandLine::runCommand(String input) {
       }
     }
     #endif
+    // NyanBox device-screen tools over serial (web remote). Each blocks until
+    // the center button OR any serial input (web "Stop"/stopscan) ends it, and
+    // streams a status feed to Serial while it runs.
+    else if (cmd_args.get(0) == DEVICE_SCOUT_CMD) {
+      Serial.println(F("Device Scout running. Stop with stopscan."));
+      WirelessDeviceScout::run(true);
+      Serial.println(F("Device Scout stopped."));
+    }
+    else if (cmd_args.get(0) == CAMERA_DETECT_CMD) {
+      Serial.println(F("Camera Detector running. Stop with stopscan."));
+      WiFiCameraDetector::run(true);
+      Serial.println(F("Camera Detector stopped."));
+    }
+    else if (cmd_args.get(0) == JAM_DETECT_CMD) {
+      Serial.println(F("Jam Detector running. Stop with stopscan."));
+      WirelessActivityTools::runJamDetector(true);
+      Serial.println(F("Jam Detector stopped."));
+    }
+    else if (cmd_args.get(0) == RF_SCANNER_CMD) {
+      Serial.println(F("RF Scanner running. Stop with stopscan."));
+      WirelessActivityTools::runScanner(true);
+      Serial.println(F("RF Scanner stopped."));
+    }
+    else if (cmd_args.get(0) == NYAN_BLE_CMD) {
+      const int t = this->argSearch(&cmd_args, "-t");
+      if (t == -1) {
+        Serial.println(HELP_NYAN_BLE_CMD);
+      } else {
+        const String k = cmd_args.get(t + 1);
+        using DT = BLEDeviceDetectors::DetectorType;
+        bool ok = true;
+        DT type = DT::Tile;
+        if (k == "meshtastic") type = DT::Meshtastic;
+        else if (k == "meshcore") type = DT::MeshCore;
+        else if (k == "smarttag") type = DT::SmartTag;
+        else if (k == "tile") type = DT::Tile;
+        else if (k == "axon") type = DT::Axon;
+        else if (k == "nyanbox") type = DT::NyanBox;
+        else if (k == "ibeacon") type = DT::IBeacon;
+        else { ok = false; Serial.println(HELP_NYAN_BLE_CMD); }
+        if (ok) {
+          Serial.println("NyanBox BLE detector (" + k + "). Stop with stopscan.");
+          BLEDeviceDetectors::run(type, 0, true);
+          Serial.println(F("BLE detector stopped."));
+        }
+      }
+    }
     // Raw sniff
     else if (cmd_args.get(0) == SNIFF_RAW_CMD)
       this->startScanFromCLI(WIFI_SCAN_RAW_CAPTURE, TFT_WHITE, "Raw sniff");

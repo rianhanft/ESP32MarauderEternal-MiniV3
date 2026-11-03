@@ -424,9 +424,10 @@ void showError(const char* message) {
 
 }  // namespace
 
-void run(DetectorType detector, uint32_t durationMs) {
+void run(DetectorType detector, uint32_t durationMs, bool fromSerial) {
   if (!ensureBuffers()) { showError("Out of memory for BLE detector."); return; }
   if (!durationMs) releaseControls();
+  if (fromSerial) while (Serial.available()) Serial.read();
   activeDetector = detector;
   resetResults();
 
@@ -455,6 +456,10 @@ void run(DetectorType detector, uint32_t durationMs) {
   while (true) {
     if ((durationMs && uint32_t(millis() - startedMs) >= durationMs) || c_btn.justPressed())
       break;
+    if (fromSerial && Serial.available()) {  // web "Stop"/stopscan ends the tool
+      while (Serial.available()) Serial.read();
+      break;
+    }
 
     uint8_t count = 0;
     portENTER_CRITICAL(&resultMux);
@@ -602,7 +607,7 @@ void runIBeaconChecks() {
 #else
 
 namespace BLEDeviceDetectors {
-void run(DetectorType, uint32_t) {}
+void run(DetectorType, uint32_t, bool) {}
 bool observeIBeaconAdvertisement(const uint8_t*, size_t, const char*, int8_t, uint32_t) { return false; }
 unsigned iBeaconCount() { return 0; }
 bool snapshotIBeacon(unsigned, marauder::IBeaconObservation&) { return false; }

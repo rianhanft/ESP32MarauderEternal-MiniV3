@@ -100,6 +100,12 @@ const char PROGMEM MAC_TRACK_CMD[] = "mactrack";
 const char PROGMEM SNIFF_SAE_CMD[] = "sniffsae";
 const char PROGMEM REMOTE_ID_CMD[] = "remoteid";
 const char PROGMEM CSI_MOTION_CMD[] = "csimotion";
+// NyanBox device-screen tools, launchable over serial for the web remote.
+const char PROGMEM DEVICE_SCOUT_CMD[] = "devicescout";
+const char PROGMEM CAMERA_DETECT_CMD[] = "cameradetect";
+const char PROGMEM JAM_DETECT_CMD[] = "jamdetector";
+const char PROGMEM RF_SCANNER_CMD[] = "rfscanner";
+const char PROGMEM NYAN_BLE_CMD[] = "nyanble";
 
 // WiFi attack
 const char PROGMEM ATTACK_CMD[] = "attack";
@@ -186,6 +192,11 @@ const char PROGMEM HELP_MAC_TRACK_CMD[] = "mactrack";
 const char PROGMEM HELP_SNIFF_SAE_CMD[] = "sniffsae";
 const char PROGMEM HELP_REMOTE_ID_CMD[] = "remoteid <scan/list/track/clear> [index]";
 const char PROGMEM HELP_CSI_MOTION_CMD[] = "csimotion start <AP index>/recalibrate/status (stop with stopscan)";
+const char PROGMEM HELP_DEVICE_SCOUT_CMD[] = "devicescout - NyanBox device scout (stop with stopscan)";
+const char PROGMEM HELP_CAMERA_DETECT_CMD[] = "cameradetect - NyanBox Wi-Fi camera detector (stop with stopscan)";
+const char PROGMEM HELP_JAM_DETECT_CMD[] = "jamdetector - NyanBox jam/anomaly detector (stop with stopscan)";
+const char PROGMEM HELP_RF_SCANNER_CMD[] = "rfscanner - NyanBox Wi-Fi/BLE activity scanner (stop with stopscan)";
+const char PROGMEM HELP_NYAN_BLE_CMD[] = "nyanble -t <meshtastic/meshcore/smarttag/tile/axon/nyanbox/ibeacon> (stop with stopscan)";
 
 // WiFi attack
 const char PROGMEM HELP_ATTACK_CMD[] = "attack -t <quiet/csa/sae/beacon [-l/-r/-a]/deauth [-c]/[-s <src mac>] [-d <dst mac>]/probe/rickroll/badmsg [-c]/sleep [-c]>";

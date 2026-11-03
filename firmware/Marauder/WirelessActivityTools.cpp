@@ -275,9 +275,11 @@ void showError(const char* message) {
   display_obj.tft.print(F("Center: exit"));
 }
 
-void runTool(bool detector) {
+void runTool(bool detector, bool fromSerial) {
   releaseControls();
   resetCounters();
+  if (fromSerial)  // drop the CLI's trailing newline so it can't self-exit
+    while (Serial.available()) Serial.read();
 
   if (NimBLEDevice::isInitialized())
     NimBLEDevice::deinit(true);
@@ -332,9 +334,14 @@ void runTool(bool detector) {
   uint8_t bleStrikes = 0;
   uint16_t graceDwells = 0;
 
+  uint32_t nextSerial = 0;
   while (true) {
     if (c_btn.justPressed())
       break;
+    if (fromSerial && Serial.available()) {  // web "Stop"/stopscan ends the tool
+      while (Serial.available()) Serial.read();
+      break;
+    }
     if (detector && baselineReady && r_btn.justPressed()) {
       memset(samples, 0, sizeof(samples));
       memset(baselineFrameSums, 0, sizeof(baselineFrameSums));
@@ -465,6 +472,37 @@ void runTool(bool detector) {
       else
         drawScanner(samples, bleRate);
     }
+    // Serial telemetry for the web remote: one status line per second so the
+    // browser console shows what the on-screen tool is doing.
+    if (fromSerial && static_cast<int32_t>(now - nextSerial) >= 0) {
+      nextSerial = now + 1000;
+      if (detector && !baselineReady) {
+        Serial.printf("[JAM] calibrating... sweep %u/%u\n",
+                      (unsigned)(baselineSweeps + 1), (unsigned)BASELINE_SWEEPS);
+      } else if (detector) {
+        bool act = false, noi = false;
+        int ch = -1;
+        for (uint8_t i = 0; i < CHANNEL_COUNT; i++) {
+          if (frameStrikes[i] >= STRIKE_ON) { act = true; if (ch < 0) ch = i + 1; }
+          if (noiseStrikes[i] >= STRIKE_ON) { noi = true; if (ch < 0) ch = i + 1; }
+        }
+        const bool ble = bleStrikes >= STRIKE_ON;
+        if (!(act || noi || ble))
+          Serial.printf("[JAM] NORMAL  ble %lu/%lu/s\n",
+                        (unsigned long)bleRate, (unsigned long)baselineBleRate);
+        else
+          Serial.printf("[JAM] ANOMALY ch%d  act=%d noise=%d ble=%d  ble %lu/%lu/s\n",
+                        ch < 0 ? 0 : ch, act, noi, ble,
+                        (unsigned long)bleRate, (unsigned long)baselineBleRate);
+      } else {
+        uint8_t busy = 0; uint16_t best = 0;
+        for (uint8_t i = 0; i < CHANNEL_COUNT; i++)
+          if (samples[i].frames >= best) { best = samples[i].frames; busy = i + 1; }
+        Serial.printf("[SCAN] ch%u  ble %lu/s  busiest ch%u %uf/500ms\n",
+                      (unsigned)activeChannel, (unsigned long)bleRate,
+                      (unsigned)busy, (unsigned)best);
+      }
+    }
     delay(5);
   }
 
@@ -486,16 +524,16 @@ void runTool(bool detector) {
 
 }  // namespace
 
-void runScanner() { runTool(false); }
-void runJamDetector() { runTool(true); }
+void runScanner(bool fromSerial) { runTool(false, fromSerial); }
+void runJamDetector(bool fromSerial) { runTool(true, fromSerial); }
 
 }  // namespace WirelessActivityTools
 
 #else
 
 namespace WirelessActivityTools {
-void runScanner() {}
-void runJamDetector() {}
+void runScanner(bool) {}
+void runJamDetector(bool) {}
 }
 
 #endif

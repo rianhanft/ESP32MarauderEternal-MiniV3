@@ -373,7 +373,7 @@ void showError(const char* message) {
 
 }  // namespace
 
-void run() {
+void run(bool fromSerial) {
   if (!ensureBuffers()) { showError("Out of memory for Device Scout."); return; }
   releaseControls();
   resetResults();
@@ -417,9 +417,15 @@ void run() {
   uint32_t nextChannelHop = millis() + CHANNEL_DWELL_MS;
   uint32_t nextWindow = millis() + PERSISTENCE_WINDOW_MS;
   uint32_t nextDraw = 0;
+  uint32_t nextScoutSerial = 0;
+  if (fromSerial) while (Serial.available()) Serial.read();
   while (true) {
     if (c_btn.justPressed())
       break;
+    if (fromSerial && Serial.available()) {  // web "Stop"/stopscan ends the tool
+      while (Serial.available()) Serial.read();
+      break;
+    }
     const uint32_t now = millis();
     if (wifiError == ESP_OK && static_cast<int32_t>(now - nextChannelHop) >= 0) {
       scanChannel = (scanChannel % 11) + 1;
@@ -486,6 +492,20 @@ void run() {
         drawList(selected);
       drawnRevision = revision;
     }
+    // Serial telemetry for the web remote: dump the ranked list every ~2s.
+    if (fromSerial && static_cast<int32_t>(now - nextScoutSerial) >= 0) {
+      nextScoutSerial = now + 2000;
+      const uint8_t n = snapshotBuf ? copyResults(snapshotBuf) : 0;
+      Serial.printf("[SCOUT] %u device(s), ch%u\n", (unsigned)n,
+                    (unsigned)scanChannel);
+      for (uint8_t i = 0; i < n && i < 12; i++) {
+        const Device& dv = snapshotBuf[i];
+        Serial.printf("  %2u %s %s %ddBm ch%u %s\n", (unsigned)i,
+                      dv.kind == BLE_DEVICE ? "BLE " : "WIFI", dv.address,
+                      (int)dv.rssi, (unsigned)dv.channel,
+                      dv.name[0] ? dv.name : "(unknown)");
+      }
+    }
     delay(5);
   }
 
@@ -524,7 +544,7 @@ void run() {
 #else
 
 namespace WirelessDeviceScout {
-void run() {}
+void run(bool) {}
 }
 
 #endif

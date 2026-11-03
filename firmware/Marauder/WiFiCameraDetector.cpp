@@ -865,7 +865,7 @@ void drawDeauthPreflight(const DeauthTarget& plan, uint8_t selected) {
 
 }  // namespace
 
-void run() {
+void run(bool fromSerial) {
   if (!ensureBuffers()) { showError("Out of memory for Camera Detector."); return; }
   releaseControls();
   resetResults();
@@ -876,7 +876,9 @@ void run() {
   uint32_t drawnRevision = UINT32_MAX;
   uint32_t nextRefresh = 0;
   uint32_t nextChannelHop = millis() + CHANNEL_DWELL_MS;
+  uint32_t nextCamSerial = 0;
   scanChannel = 1;
+  if (fromSerial) while (Serial.available()) Serial.read();
 
   if (error != ESP_OK)
     showError("Passive Wi-Fi scan could not start.");
@@ -884,6 +886,10 @@ void run() {
   while (true) {
     if (c_btn.justPressed())
       break;
+    if (fromSerial && Serial.available()) {  // web "Stop"/stopscan ends the tool
+      while (Serial.available()) Serial.read();
+      break;
+    }
 
     if (error == ESP_OK &&
         static_cast<int32_t>(millis() - nextChannelHop) >= 0) {
@@ -931,6 +937,21 @@ void run() {
       else
         drawList(selected);
       drawnRevision = revision;
+    }
+    // Serial telemetry for the web remote: dump the candidate list every ~2s.
+    if (fromSerial && static_cast<int32_t>(millis() - nextCamSerial) >= 0) {
+      nextCamSerial = millis() + 2000;
+      const uint8_t n = copyResults(uiSnapshot);
+      Serial.printf("[CAM] %u candidate(s), ch%u\n", (unsigned)n,
+                    (unsigned)scanChannel);
+      for (uint8_t i = 0; i < n && i < 12; i++) {
+        const Detection& cam = uiSnapshot[i];
+        const char conf = cam.confidence >= CONFIDENCE_HIGH ? 'H' :
+            (cam.confidence >= CONFIDENCE_MEDIUM ? 'M' : 'L');
+        Serial.printf("  %2u [%c] %-11s %s %ddBm ch%u %s\n", (unsigned)i, conf,
+                      cam.vendor, cam.address, (int)cam.rssi,
+                      (unsigned)cam.channel, cam.ssid[0] ? cam.ssid : "(hidden)");
+      }
     }
     delay(5);
   }
@@ -1122,7 +1143,7 @@ bool selectDeauthTarget(DeauthTarget& target) {
 #else
 
 namespace WiFiCameraDetector {
-void run() {}
+void run(bool) {}
 bool selectDeauthTarget(DeauthTarget&) { return false; }
 }
 
