@@ -314,11 +314,19 @@ uint32_t currentTime  = 0;
   SDInterface sd_obj = SDInterface(&sharedSPI, SD_CS);
 #endif
 
+#ifdef HAS_T_DONGLE_DISPLAY
+  // Diagnostic: flushed boot checkpoints so a serial monitor shows how far
+  // setup() reaches before a crash. No-op on every other board.
+  #define TDBG(msg) do { Serial.println(F("[TDBG] " msg)); Serial.flush(); delay(30); } while (0)
+#else
+  #define TDBG(msg) do {} while (0)
+#endif
+
 void setup()
 {
   randomSeed(esp_random());
   
-  #ifndef DEVELOPER
+  #if !defined(DEVELOPER) && !defined(HAS_T_DONGLE_DISPLAY)
     esp_log_level_set("*", ESP_LOG_NONE);
   #endif
   
@@ -378,12 +386,14 @@ void setup()
   //  delay(10);
 
   Serial.println("ESP-IDF version is: " + String(esp_get_idf_version()));
+  TDBG("A: serial up, idf printed");
 
   #ifdef HAS_PSRAM
     if (!psramInit()) {
       Serial.println(F("PSRAM not available"));
     }
   #endif
+  TDBG("B: psram init done");
 
   #ifdef HAS_SIMPLEX_DISPLAY
     #if defined(HAS_SD)
@@ -424,6 +434,7 @@ void setup()
   #endif
 
   settings_obj.begin();
+  TDBG("C: settings_obj.begin done");
 
   const char* type = settings_obj.getSettingType("wu");
 
@@ -440,14 +451,19 @@ void setup()
 
     #endif
   #endif
+  TDBG("D: SD init done");
 
+  TDBG("D9: pre wifi_scan RunSetup");
   wifi_scan_obj.RunSetup();
+  TDBG("E: wifi_scan RunSetup done");
 
   #ifdef HAS_T_DONGLE_DISPLAY
     t_dongle_display.begin();
   #endif
+  TDBG("F: t_dongle_display.begin done");
 
   evil_portal_obj.setup();
+  TDBG("G: evil_portal setup done");
 
   #ifdef HAS_BATTERY
     battery_obj.RunSetup();
@@ -467,10 +483,12 @@ void setup()
   #elif defined(HAS_NEOPIXEL_LED) || defined(HAS_T_DONGLE_LED)
     led_obj.RunSetup();
   #endif
+  TDBG("H: led RunSetup done");
 
   #ifdef HAS_GPS
     gps_obj.begin();
   #endif
+  TDBG("I: gps begin done");
 
   #ifdef HAS_SCREEN  
     display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -493,9 +511,11 @@ void setup()
 
   menu_function_obj.changeMenu(menu_function_obj.current_menu);*/
 
+  TDBG("J: pre StartScan(OFF)");
   wifi_scan_obj.StartScan(WIFI_SCAN_OFF);
-  
+
   cli_obj.RunSetup();
+  TDBG("Z: setup() complete -- entering loop, CLI ready");
 }
 
 
