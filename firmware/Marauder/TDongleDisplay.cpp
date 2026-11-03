@@ -16,6 +16,11 @@ void TDongleDisplay::begin() {
   pinMode(kBacklightPin, OUTPUT);
   digitalWrite(kBacklightPin, HIGH);
   delay(500);
+  // The SD card's sharedSPI.begin() already claimed this bus; point it back at
+  // the TFT pins before init or the ST7735 never receives its setup commands.
+  SPI.end();
+  SPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
+            T_DONGLE_SPI_MOSI_PIN, -1);
   tft.init();
   tft.setRotation(3);
   tft.fillScreen(TFT_BLACK);
@@ -93,6 +98,50 @@ bool TDongleDisplay::update(uint32_t now, const WiFiScan& scan) {
   last_channel = scan.set_channel;
   last_mode = scan.currentScanMode;
   return drew;
+}
+
+void TDongleDisplay::selfTest() {
+  Serial.println(F("[TFT] self-test start"));
+  SPI.end();
+  SPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
+            T_DONGLE_SPI_MOSI_PIN, -1);
+  pinMode(kBacklightPin, OUTPUT);
+  digitalWrite(kBacklightPin, LOW);  // on, if backlight is active-low
+  tft.init();
+  tft.setRotation(3);
+  Serial.printf("[TFT] panel reports %dx%d, backlight pin %d = LOW\n",
+                (int)tft.width(), (int)tft.height(), (int)kBacklightPin);
+
+  const uint16_t cols[4] = { TFT_RED, TFT_GREEN, TFT_BLUE, TFT_WHITE };
+  const char* names[4] = { "RED", "GREEN", "BLUE", "WHITE" };
+  for (int i = 0; i < 4; i++) {
+    Serial.print(F("[TFT] fill ")); Serial.print(names[i]);
+    Serial.println(F("  (what color is on the screen?)"));
+    tft.fillScreen(cols[i]);
+    delay(1600);
+  }
+
+  tft.fillScreen(TFT_BLACK);
+  tft.drawRect(0, 0, tft.width(), tft.height(), TFT_WHITE);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(1);
+  tft.drawString("TFT TEST", 4, 4, 1);
+  tft.drawString("abc 12345", 4, 20, 1);
+  Serial.println(F("[TFT] white border + text -- centered? shifted? cut off?"));
+  delay(2500);
+
+  Serial.println(F("[TFT] invert ON"));
+  tft.invertDisplay(true);
+  delay(2000);
+  Serial.println(F("[TFT] invert OFF"));
+  tft.invertDisplay(false);
+  delay(2000);
+
+  Serial.println(F("[TFT] pin toggled HIGH -- if that's the backlight, screen goes dark now"));
+  digitalWrite(kBacklightPin, HIGH);
+  delay(2000);
+  digitalWrite(kBacklightPin, LOW);
+  Serial.println(F("[TFT] self-test done"));
 }
 
 #endif

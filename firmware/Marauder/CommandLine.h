@@ -106,6 +106,7 @@ const char PROGMEM CAMERA_DETECT_CMD[] = "cameradetect";
 const char PROGMEM JAM_DETECT_CMD[] = "jamdetector";
 const char PROGMEM RF_SCANNER_CMD[] = "rfscanner";
 const char PROGMEM NYAN_BLE_CMD[] = "nyanble";
+const char PROGMEM TFT_TEST_CMD[] = "tfttest";
 
 // WiFi attack
 const char PROGMEM ATTACK_CMD[] = "attack";
@@ -197,6 +198,7 @@ const char PROGMEM HELP_CAMERA_DETECT_CMD[] = "cameradetect - NyanBox Wi-Fi came
 const char PROGMEM HELP_JAM_DETECT_CMD[] = "jamdetector - NyanBox jam/anomaly detector (stop with stopscan)";
 const char PROGMEM HELP_RF_SCANNER_CMD[] = "rfscanner - NyanBox Wi-Fi/BLE activity scanner (stop with stopscan)";
 const char PROGMEM HELP_NYAN_BLE_CMD[] = "nyanble -t <meshtastic/meshcore/smarttag/tile/axon/nyanbox/ibeacon> (stop with stopscan)";
+const char PROGMEM HELP_TFT_TEST_CMD[] = "tfttest - T-Dongle display bring-up self-test (watch the screen)";
 
 // WiFi attack
 const char PROGMEM HELP_ATTACK_CMD[] = "attack -t <quiet/csa/sae/beacon [-l/-r/-a]/deauth [-c]/[-s <src mac>] [-d <dst mac>]/probe/rickroll/badmsg [-c]/sleep [-c]>";

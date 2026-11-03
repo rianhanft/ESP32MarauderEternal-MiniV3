@@ -12,6 +12,7 @@ class TDongleDisplay {
  public:
   void begin();
   bool update(uint32_t now, const WiFiScan& scan);
+  void selfTest();  // CLI "tfttest": display bring-up diagnostic over serial
 
  private:
   TFT_eSPI tft;

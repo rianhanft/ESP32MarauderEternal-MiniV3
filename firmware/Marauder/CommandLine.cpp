@@ -7,6 +7,11 @@
 #include "WirelessActivityTools.h"
 #include "BLEDeviceDetectors.h"
 
+#ifdef HAS_T_DONGLE_DISPLAY
+  #include "TDongleDisplay.h"
+  extern TDongleDisplay t_dongle_display;
+#endif
+
 // GCOVR_EXCL_START -- serial protocol output depends on Arduino Serial.
 namespace {
   bool parseFiniteNumber(const String& value, double& parsed) {
@@ -333,6 +338,9 @@ void CommandLine::runCommand(String input) {
     Serial.println(HELP_JAM_DETECT_CMD);
     Serial.println(HELP_RF_SCANNER_CMD);
     Serial.println(HELP_NYAN_BLE_CMD);
+    #ifdef HAS_T_DONGLE_DISPLAY
+      Serial.println(HELP_TFT_TEST_CMD);
+    #endif
     Serial.println(HELP_STOPSCAN_CMD);
     #ifdef HAS_GPS
       Serial.println(HELP_WARDRIVE_CMD);
@@ -1070,6 +1078,11 @@ void CommandLine::runCommand(String input) {
         }
       }
     }
+    #ifdef HAS_T_DONGLE_DISPLAY
+    else if (cmd_args.get(0) == TFT_TEST_CMD) {
+      t_dongle_display.selfTest();
+    }
+    #endif
     // Raw sniff
     else if (cmd_args.get(0) == SNIFF_RAW_CMD)
       this->startScanFromCLI(WIFI_SCAN_RAW_CAPTURE, TFT_WHITE, "Raw sniff");
