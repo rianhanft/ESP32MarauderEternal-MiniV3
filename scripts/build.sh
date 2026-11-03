@@ -2,7 +2,7 @@
 # Build the merged official-base Marauder firmware for a given board target.
 #
 # Usage:  scripts/build.sh <BOARD> [BUILD_DIR]
-#   BOARD = PANCAKE | V8 | MINI_V3 | WS_C5_35
+#   BOARD = PANCAKE | V8 | MINI_V3 | WS_C5_35 | TDONGLE_C5
 #
 # Requires arduino-cli with the ESP32 Arduino core 3.3.4 installed.
 # Set ARDUINO_CLI_BIN to the arduino-cli path if it is not on PATH.
@@ -27,7 +27,9 @@ case "${BOARD}" in
             FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled" ;;
   MINI_V3)  FLAG="MARAUDER_MINI_V3"; TFT="User_Setup_marauder_mini_v3.h";
             FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled" ;;
-  *) echo "Unknown board '${BOARD}'. Use PANCAKE|V8|MINI_V3|WS_C5_35." >&2; exit 2 ;;
+  TDONGLE_C5) FLAG="MARAUDER_T_DONGLE_C5"; TFT="User_Setup_t_dongle_c5.h";
+            FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled" ;;
+  *) echo "Unknown board '${BOARD}'. Use PANCAKE|V8|MINI_V3|WS_C5_35|TDONGLE_C5." >&2; exit 2 ;;
 esac
 
 # --- locate arduino-cli -----------------------------------------------------
