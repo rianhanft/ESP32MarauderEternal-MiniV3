@@ -50,8 +50,30 @@ BUF_MAX = 250_000  # keep ~last 250 KB of serial output in memory
 
 
 class SerialBridge:
-    def __init__(self, port, baud):
-        self.ser = serial.Serial(port, baud, timeout=0.1)
+    def __init__(self, port, baud, assert_lines=False):
+        # Native-USB ESP32 parts (USB-Serial-JTAG: ESP32-C3/C5/C6/S3, e.g. the
+        # LilyGo T-Dongle C5) jump into the ROM bootloader if DTR/RTS are
+        # asserted when the port is opened -- that leaves the firmware's CLI
+        # dead until you physically replug. So open with both lines de-asserted.
+        # That is also the "run" state for a UART-bridge board's auto-reset
+        # circuit, so the V8 / Mini V3 are unaffected. --assert-dtr flips it back
+        # for any board that instead needs DTR held high to talk.
+        ser = serial.Serial()
+        ser.port = port
+        ser.baudrate = baud
+        ser.timeout = 0.1
+        try:
+            ser.dtr = assert_lines
+            ser.rts = assert_lines
+        except Exception:
+            pass
+        ser.open()
+        try:  # some USB-CDC drivers only apply line state after open()
+            ser.dtr = assert_lines
+            ser.rts = assert_lines
+        except Exception:
+            pass
+        self.ser = ser
         self.port = port
         self.baud = baud
         self._buf = bytearray()
@@ -956,6 +978,10 @@ def main():
     ap = argparse.ArgumentParser(description="Drive MarauderBox from your phone over WiFi.")
     ap.add_argument("--port", help="serial port (auto-detected if omitted)")
     ap.add_argument("--baud", type=int, default=115200)
+    ap.add_argument("--assert-dtr", action="store_true",
+                    help="hold DTR/RTS asserted on open (legacy). Default leaves "
+                         "them low so native-USB boards (T-Dongle C5) don't reset "
+                         "into the bootloader; use this only if a board stays silent")
     ap.add_argument("--host", default="0.0.0.0", help="bind address (default: all interfaces)")
     ap.add_argument("--http-port", type=int, default=8080)
     ap.add_argument("--token", default="", help="shared secret required on the URL")
@@ -978,7 +1004,7 @@ def main():
         sys.exit("No serial port found. Plug in the Marauder, or pass --port (see --list-ports).")
 
     try:
-        bridge = SerialBridge(port, args.baud)
+        bridge = SerialBridge(port, args.baud, assert_lines=args.assert_dtr)
     except Exception as e:
         sys.exit(f"Could not open {port}: {e}")
 
@@ -994,6 +1020,8 @@ def main():
     print("=" * 64)
     print("  MarauderBox Remote ready")
     print(f"  Serial : {port} @ {args.baud}    HTTP port: {args.http_port}")
+    print(f"  USB lines: DTR/RTS {'asserted' if args.assert_dtr else 'low (no-reset)'}"
+          f"{'  (pass --assert-dtr if the device stays silent)' if not args.assert_dtr else ''}")
 
     if args.tunnel:
         print("  Opening a public tunnel (cloudflared)...")
