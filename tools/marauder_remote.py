@@ -49,15 +49,56 @@ except ImportError:
 BUF_MAX = 250_000  # keep ~last 250 KB of serial output in memory
 
 
+def _prefer_callout(dev):
+    # macOS: the /dev/cu.* (call-out) device does NOT assert DTR or wait for DCD
+    # on open the way /dev/tty.* does, so it won't reset a native-USB ESP32
+    # (USB-Serial-JTAG) when the web remote connects. Always use cu.* there.
+    if sys.platform == "darwin" and dev and dev.startswith("/dev/tty."):
+        return "/dev/cu." + dev[len("/dev/tty."):]
+    return dev
+
+
+def _disable_hupcl_fd(fd):
+    import termios
+    attrs = termios.tcgetattr(fd)
+    attrs[2] &= ~termios.HUPCL  # cflag: don't drop DTR when the port closes
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+
+
+def _predisable_hupcl(port):
+    # Native-USB ESP32 boards reboot when DTR is pulsed. On macOS/Linux the tty
+    # layer pulses DTR on open because of the HUPCL flag, which reboots the dongle
+    # every time the web remote connects (and blanks its screen). Clear HUPCL on a
+    # throwaway fd first so pyserial's open() below doesn't reset the board. No-op
+    # on Windows or if the port can't be pre-opened.
+    if os.name != "posix":
+        return
+    try:
+        fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    except Exception:
+        return
+    try:
+        _disable_hupcl_fd(fd)
+    except Exception:
+        pass
+    finally:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+
+
 class SerialBridge:
     def __init__(self, port, baud, assert_lines=False):
         # Native-USB ESP32 parts (USB-Serial-JTAG: ESP32-C3/C5/C6/S3, e.g. the
-        # LilyGo T-Dongle C5) jump into the ROM bootloader if DTR/RTS are
-        # asserted when the port is opened -- that leaves the firmware's CLI
-        # dead until you physically replug. So open with both lines de-asserted.
-        # That is also the "run" state for a UART-bridge board's auto-reset
-        # circuit, so the V8 / Mini V3 are unaffected. --assert-dtr flips it back
-        # for any board that instead needs DTR held high to talk.
+        # LilyGo T-Dongle C5) reboot when DTR/RTS are pulsed as the port opens --
+        # that reboots the dongle (blanking its screen) and, before this, left the
+        # CLI dead until a replug. Defenses: use the cu.* device on macOS, clear
+        # HUPCL so the tty layer doesn't pulse DTR, and keep both lines de-asserted
+        # (also the "run" state for a UART-bridge board, so V8 / Mini V3 are
+        # unaffected). --assert-dtr flips the lines back if a board needs DTR high.
+        port = _prefer_callout(port)
+        _predisable_hupcl(port)
         ser = serial.Serial()
         ser.port = port
         ser.baudrate = baud
@@ -68,6 +109,10 @@ class SerialBridge:
         except Exception:
             pass
         ser.open()
+        try:  # keep DTR steady across a later close so reconnecting won't reset
+            _disable_hupcl_fd(ser.fileno())
+        except Exception:
+            pass
         try:  # some USB-CDC drivers only apply line state after open()
             ser.dtr = assert_lines
             ser.rts = assert_lines
@@ -879,8 +924,8 @@ def autodetect_port():
     for p in ports:
         blob = f"{p.device} {p.description} {p.manufacturer}".lower()
         if any(h in blob for h in hints):
-            return p.device
-    return ports[0].device if ports else None
+            return _prefer_callout(p.device)
+    return _prefer_callout(ports[0].device) if ports else None
 
 
 def lan_ips():
@@ -999,7 +1044,7 @@ def main():
             print(f"  {p.device:20} {p.description}")
         return
 
-    port = args.port or autodetect_port()
+    port = _prefer_callout(args.port) if args.port else autodetect_port()
     if not port:
         sys.exit("No serial port found. Plug in the Marauder, or pass --port (see --list-ports).")
 
