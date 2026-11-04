@@ -314,9 +314,9 @@ uint32_t currentTime  = 0;
   SDInterface sd_obj = SDInterface(&sharedSPI, SD_CS);
 #endif
 
-#ifdef HAS_T_DONGLE_DISPLAY
-  // Diagnostic: flushed boot checkpoints so a serial monitor shows how far
-  // setup() reaches before a crash. No-op on every other board.
+// Boot checkpoints used while bringing up the T-Dongle C5; quiet by default.
+// Build with -DTDBG_VERBOSE to re-enable the flushed [TDBG] serial trace.
+#if defined(HAS_T_DONGLE_DISPLAY) && defined(TDBG_VERBOSE)
   #define TDBG(msg) do { Serial.println(F("[TDBG] " msg)); Serial.flush(); delay(30); } while (0)
 #else
   #define TDBG(msg) do {} while (0)
@@ -326,7 +326,7 @@ void setup()
 {
   randomSeed(esp_random());
   
-  #if !defined(DEVELOPER) && !defined(HAS_T_DONGLE_DISPLAY)
+  #ifndef DEVELOPER
     esp_log_level_set("*", ESP_LOG_NONE);
   #endif
   

@@ -22,6 +22,8 @@ class TDongleDisplay {
   int last_ble_count = -1;
   int last_channel = -1;
   int last_mode = -1;
+  uint32_t init_time = 0;    // millis() at begin(), for the self-heal re-inits
+  uint8_t reinit_count = 0;  // panel re-inits done in the first seconds of boot
 
   void drawValue(uint8_t row, const char* label, int value, uint16_t color);
 };

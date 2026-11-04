@@ -30,6 +30,8 @@ void TDongleDisplay::begin() {
   tft.drawString("MARAUDER CLI", 2, 1);
   tft.drawFastHLine(0, 11, tft.width(), TFT_DARKGREY);
   digitalWrite(kBacklightPin, LOW);
+  init_time = millis();
+  reinit_count = 0;
 }
 
 void TDongleDisplay::drawValue(uint8_t row, const char* label, int value, uint16_t color) {
@@ -45,6 +47,32 @@ bool TDongleDisplay::update(uint32_t now, const WiFiScan& scan) {
   if (now - last_update < kRefreshMs) return false;
   last_update = now;
   bool drew = false;
+
+  // Connecting the web remote triggers a partial reset (rst 0x15) that the
+  // one-shot begin() can't always bring the panel back from -- the screen stays
+  // grey while attached. Re-initialize the panel a few times over the first few
+  // seconds of each boot (a connect causes a reboot, so this runs after it too)
+  // so the display self-heals instead of staying blank.
+  if (reinit_count < 4 &&
+      static_cast<int32_t>(now - init_time) >=
+          static_cast<int32_t>((reinit_count + 1) * 1200)) {
+    reinit_count++;
+    SPI.end();
+    SPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
+              T_DONGLE_SPI_MOSI_PIN, -1);
+    pinMode(kBacklightPin, OUTPUT);
+    digitalWrite(kBacklightPin, LOW);
+    tft.init();
+    tft.setRotation(3);
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextFont(1);
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString("MARAUDER CLI", 2, 1);
+    tft.drawFastHLine(0, 11, tft.width(), TFT_DARKGREY);
+    last_ap_count = -1; last_station_count = -1; last_ble_count = -1;
+    last_channel = -1; last_mode = -1;  // force every value to redraw below
+  }
 
   const int ap_count = static_cast<int>(scan.retainedAccessPointCount());
   const int station_count = static_cast<int>(scan.retainedStationCount());
