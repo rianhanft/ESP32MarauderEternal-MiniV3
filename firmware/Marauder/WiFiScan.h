@@ -414,6 +414,15 @@ class WiFiScan
     uint8_t camera_deauth_cursor = 0;
     uint8_t camera_deauth_view = 0;
     uint32_t camera_deauth_next_ui = 0;
+    // Unified live attack status HUD (deauth, beacon spam, bad msg, sleep, ...).
+    uint32_t attack_pkts_total = 0;   // cumulative frames sent this attack run
+    uint32_t attack_start_ms = 0;     // millis() at attack start, for elapsed
+    uint32_t attack_next_ui = 0;      // HUD redraw timer (cumulative-count modes)
+    uint32_t hud_prev_ms = 0;         // rate sampler: time of last sample
+    uint32_t hud_prev_total = 0;      // rate sampler: total at last sample
+    uint16_t attack_tx_rate = 0;      // packets/sec (smoothed, for display)
+    uint8_t  hud_view = 0;            // which selected AP the HUD is cycling on
+    uint32_t hud_view_ms = 0;         // AP-cycle timer
     uint32_t remote_id_last_render_ms = 0;
     uint8_t remote_id_schedule_step = 0;
     uint8_t remote_id_beacon_channel_index = 0;
@@ -864,6 +873,8 @@ class WiFiScan
     // Ported from Marauder Eternal: Camera Deauther (internal helpers).
     void sendCameraDeauthFrame(WiFiCameraDetector::DeauthLink& link);
     void drawCameraDeauthStatus();
+    // Unified live attack status HUD shown while a WiFi attack is transmitting.
+    void drawAttackStatus();
     void sendEapolBagMsg1(uint8_t bssid[6], int channel, uint8_t mac[6], uint8_t sec = WIFI_SECURITY_WPA2);
     void sendAssociationSleep(const char* ESSID, uint8_t bssid[6], int channel, uint8_t mac[6]);
     void broadcastRandomSSID(uint32_t currentTime);

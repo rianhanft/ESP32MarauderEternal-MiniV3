@@ -3197,6 +3197,15 @@ void WiFiScan::startWiFiAttacks(uint8_t scan_mode, uint16_t color, const char* t
   }
         
   packets_sent = 0;
+  // Reset the live attack status HUD counters for this run.
+  this->attack_pkts_total = 0;
+  this->attack_start_ms = millis();
+  this->attack_next_ui = 0;
+  this->hud_prev_ms = millis();
+  this->hud_prev_total = 0;
+  this->attack_tx_rate = 0;
+  this->hud_view = 0;
+  this->hud_view_ms = millis();
   esp_wifi_init(&cfg);
   #ifdef HAS_IDF_3
     esp_wifi_set_country(&country);
@@ -12328,16 +12337,171 @@ void WiFiScan::updateTrackerUI() {
 }
 
 void WiFiScan::displayTransmitRate() {
-  String displayString = "";
-  String displayString2 = "";
-  displayString.concat(text18);
-  displayString.concat(packets_sent);
-  for (int x = 0; x < STANDARD_FONT_CHAR_LIMIT; x++)
-    displayString2.concat(" ");
+  // Called ~once/sec by the beacon/spam attack branches right before they zero
+  // packets_sent. Fold the finished interval into the running total, then draw
+  // the unified live status HUD (replaces the old centered packet count).
+  this->attack_pkts_total += (this->packets_sent > 0 ? (uint32_t)this->packets_sent : 0);
+  this->packets_sent = 0;
   #ifdef HAS_SCREEN
+    this->drawAttackStatus();
+  #endif
+}
+
+// Unified live status screen shown while a WiFi attack is transmitting. Pulls
+// the attack name/color from currentScanMode, the target context from the
+// selected APs (or the SSID flood source), and live counters (total packets
+// sent, packets/sec, elapsed). Display only -- the TX path is untouched. For
+// the cumulative-count attacks total == packets_sent (attack_pkts_total stays
+// 0); for the per-second-reset beacon attacks the finished seconds live in
+// attack_pkts_total. Either way total = attack_pkts_total + packets_sent.
+void WiFiScan::drawAttackStatus() {
+  #ifdef HAS_SCREEN
+    const uint32_t now = millis();
+    const uint32_t total = this->attack_pkts_total +
+                           (this->packets_sent > 0 ? (uint32_t)this->packets_sent : 0);
+
+    // Smoothed packets/sec, sampled at most ~2x/sec.
+    uint32_t dt = now - this->hud_prev_ms;
+    if (dt >= 500) {
+      uint32_t dp = (total >= this->hud_prev_total) ? (total - this->hud_prev_total) : 0;
+      uint32_t r = dp * 1000UL / dt;
+      this->attack_tx_rate = (r > 65535UL) ? 65535 : (uint16_t)r;
+      this->hud_prev_total = total;
+      this->hud_prev_ms = now;
+    }
+    const uint32_t elapsed = (now - this->attack_start_ms) / 1000;
+
+    // Attack name + accent color + target category (0 per-AP, 1 flood, 2 manual).
+    const char* title = "ATTACK";
+    uint16_t accent = TFT_RED;
+    uint8_t category = 1;
+    switch (this->currentScanMode) {
+      case WIFI_ATTACK_DEAUTH:           title = "DEAUTH";           accent = TFT_RED;    category = 0; break;
+      case WIFI_ATTACK_DEAUTH_TARGETED:  title = "DEAUTH TARGETED";  accent = TFT_RED;    category = 0; break;
+      case WIFI_ATTACK_DEAUTH_MANUAL:    title = "DEAUTH MANUAL";    accent = TFT_RED;    category = 2; break;
+      case WIFI_ATTACK_BAD_MSG:          title = "BAD MSG";          accent = TFT_RED;    category = 0; break;
+      case WIFI_ATTACK_BAD_MSG_TARGETED: title = "BAD MSG TARGETED"; accent = TFT_RED;    category = 0; break;
+      case WIFI_ATTACK_SLEEP:            title = "ASSOC SLEEP";      accent = TFT_ORANGE; category = 0; break;
+      case WIFI_ATTACK_SLEEP_TARGETED:   title = "SLEEP TARGETED";   accent = TFT_ORANGE; category = 0; break;
+      case WIFI_ATTACK_AUTH:             title = "AUTH FLOOD";       accent = TFT_ORANGE; category = 1; break;
+      case WIFI_ATTACK_BEACON_SPAM:      title = "BEACON SPAM";      accent = TFT_GREEN;  category = 1; break;
+      case WIFI_ATTACK_BEACON_LIST:      title = "BEACON LIST";      accent = TFT_GREEN;  category = 1; break;
+      case WIFI_ATTACK_RICK_ROLL:        title = "RICK ROLL";        accent = TFT_GREEN;  category = 1; break;
+      case WIFI_ATTACK_FUNNY_BEACON:     title = "FUNNY BEACON";     accent = TFT_GREEN;  category = 1; break;
+      case WIFI_ATTACK_AP_SPAM:          title = "AP SPAM";          accent = TFT_GREEN;  category = 1; break;
+      default:                           title = "ATTACK";           accent = TFT_RED;    category = 1; break;
+    }
+
+    const int W = display_obj.tft.width();
+    const int H = display_obj.tft.height();
+    #ifdef HAS_MINI_SCREEN
+      const int pad = 2, barH = 13, lh = 11, bigFont = 2;
+    #else
+      const int pad = 5, barH = 18, lh = 16, bigFont = 4;
+    #endif
+    const int topY = 16;  // leave the top status bar (0..16) alone
+
+    // Header bar.
+    display_obj.tft.fillRect(0, topY, W, barH, accent);
+    display_obj.tft.setTextDatum(TL_DATUM);
+    display_obj.tft.setTextSize(1);
+    display_obj.tft.setTextColor(TFT_BLACK, accent);
+    display_obj.tft.drawString(title, pad, topY + (barH - 8) / 2, 1);
+    // Blinking live TX indicator on the right.
+    bool blink = ((now / 500) & 1);
+    display_obj.tft.setTextColor(blink ? TFT_BLACK : accent, accent);
+    display_obj.tft.drawString("TX", W - pad - 12, topY + (barH - 8) / 2, 1);
+
+    // Body.
+    int y = topY + barH + pad;
+    display_obj.tft.fillRect(0, y, W, H - y, TFT_BLACK);
+    display_obj.tft.setTextSize(1);
+
+    if (category == 0) {
+      int selCount = 0; String ssid; char bssid[18] = {0}; int ch = 0, rssi = 0;
+      for (int i = 0; i < access_points->size(); i++) {
+        AccessPoint ap = access_points->get(i);
+        if (!ap.selected) continue;
+        if (selCount == this->hud_view) {
+          ssid = ap.essid;
+          snprintf(bssid, sizeof(bssid), "%02X:%02X:%02X:%02X:%02X:%02X",
+                   ap.bssid[0], ap.bssid[1], ap.bssid[2], ap.bssid[3], ap.bssid[4], ap.bssid[5]);
+          ch = ap.channel; rssi = ap.rssi;
+        }
+        selCount++;
+      }
+      if (selCount == 0) {
+        display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        display_obj.tft.drawString("No networks selected", pad, y, 1); y += lh;
+      } else {
+        if (ssid.length() == 0) ssid = "(hidden)";
+        int maxc = (W - 2 * pad) / 6;
+        if (maxc > 2 && (int)ssid.length() > maxc) ssid = ssid.substring(0, maxc - 1) + "~";
+        display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        display_obj.tft.drawString(ssid, pad, y, 1); y += lh;
+        #ifndef HAS_MINI_SCREEN
+          display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
+          display_obj.tft.drawString(bssid, pad, y, 1); y += lh;
+        #endif
+        display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        display_obj.tft.drawString(String("CH ") + ch + "   " + rssi + " dBm", pad, y, 1); y += lh;
+        display_obj.tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+        display_obj.tft.drawString(String("hitting ") + (this->hud_view + 1) + " / " + selCount, pad, y, 1); y += lh;
+        if (now - this->hud_view_ms >= 1200) {
+          this->hud_view_ms = now;
+          this->hud_view = (this->hud_view + 1) % selCount;
+        }
+      }
+    } else if (category == 2) {
+      display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      display_obj.tft.drawString("Target", pad, y, 1); y += lh;
+      display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
+      display_obj.tft.drawString(this->dst_mac, pad, y, 1); y += lh;
+      display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      display_obj.tft.drawString(String("CH ") + this->set_channel, pad, y, 1); y += lh;
+    } else {
+      int n = 0;
+      if (this->currentScanMode == WIFI_ATTACK_BEACON_LIST) n = ssids->size();
+      else if (this->currentScanMode == WIFI_ATTACK_AP_SPAM) {
+        for (int i = 0; i < access_points->size(); i++) if (access_points->get(i).selected) n++;
+      }
+      display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      display_obj.tft.drawString("Source: SSID flood", pad, y, 1); y += lh;
+      if (n > 0) { display_obj.tft.drawString(String("SSIDs: ") + n, pad, y, 1); y += lh; }
+      display_obj.tft.drawString(String("CH ") + this->set_channel, pad, y, 1); y += lh;
+    }
+
+    // Divider.
+    y += 2;
+    display_obj.tft.drawFastHLine(pad, y, W - 2 * pad, TFT_DARKGREY);
+    y += pad + 2;
+
+    // Big running packet count.
     display_obj.tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    display_obj.showCenterText(displayString2.c_str(), TFT_HEIGHT / 2);
-    display_obj.showCenterText(displayString.c_str(), TFT_HEIGHT / 2);
+    display_obj.tft.drawString(String(total), pad, y, bigFont);
+    int bigH = display_obj.tft.fontHeight(bigFont);
+    #ifndef HAS_MINI_SCREEN
+      display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+      display_obj.tft.drawString("PACKETS", pad, y + bigH, 1);
+      y += bigH + lh + 2;
+    #else
+      y += bigH + 2;
+    #endif
+
+    // Rate + elapsed.
+    char et[12];
+    snprintf(et, sizeof(et), "%02lu:%02lu",
+             (unsigned long)(elapsed / 60), (unsigned long)(elapsed % 60));
+    display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    display_obj.tft.drawString(String(this->attack_tx_rate) + " pkt/s", pad, y, 1);
+    display_obj.tft.setTextDatum(TR_DATUM);
+    display_obj.tft.drawString(String(et), W - pad, y, 1);
+    display_obj.tft.setTextDatum(TL_DATUM);
+
+    #ifndef HAS_MINI_SCREEN
+      display_obj.tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+      display_obj.tft.drawString("Press / tap to stop", pad, H - 12, 1);
+    #endif
   #endif
 }
 
@@ -13711,6 +13875,23 @@ void WiFiScan::main(uint32_t currentTime)
     else if ((currentScanMode == WIFI_SCAN_OFF))
       if(gps_obj.queue_enabled())
         gps_obj.disable_queue();
+  #endif
+
+  #ifdef HAS_SCREEN
+    // Live attack HUD for the cumulative-count attacks (deauth / bad msg / sleep
+    // / auth). The beacon & spam attacks draw it from displayTransmitRate once a
+    // second instead, so they are excluded here. Display only; TX is untouched.
+    if ((currentScanMode == WIFI_ATTACK_DEAUTH) ||
+        (currentScanMode == WIFI_ATTACK_BAD_MSG) ||
+        (currentScanMode == WIFI_ATTACK_BAD_MSG_TARGETED) ||
+        (currentScanMode == WIFI_ATTACK_SLEEP) ||
+        (currentScanMode == WIFI_ATTACK_SLEEP_TARGETED) ||
+        (currentScanMode == WIFI_ATTACK_AUTH)) {
+      if (static_cast<int32_t>(millis() - this->attack_next_ui) >= 0) {
+        this->attack_next_ui = millis() + 700;
+        this->drawAttackStatus();
+      }
+    }
   #endif
 
   if ((WiFi.status() == WL_CONNECTED) || (WiFi.softAPIP() != IPAddress(0,0,0,0))) {
