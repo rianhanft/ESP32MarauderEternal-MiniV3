@@ -311,7 +311,11 @@ uint32_t currentTime  = 0;
 #endif
 
 #ifdef HAS_C5_SD
-  SPIClass sharedSPI(SPI);
+  // Reference the one global SPI object, not a copy. TFT_eSPI drives the C5
+  // display through the global SPI, and the SD shares that same bus -- a
+  // separate SPIClass copy ends up with a stale peripheral handle once TFT_eSPI
+  // (re)inits the bus, which made every SD open fail ("Failed to open file").
+  SPIClass& sharedSPI = SPI;
   SDInterface sd_obj = SDInterface(&sharedSPI, SD_CS);
 #endif
 
