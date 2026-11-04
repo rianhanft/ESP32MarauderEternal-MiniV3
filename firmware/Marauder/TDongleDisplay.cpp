@@ -8,6 +8,12 @@
 #include "soc/soc.h"
 #include "soc/usb_serial_jtag_reg.h"
 
+// The microSD card and the TFT share one SPI bus. The SD is bound to this
+// instance (SD.begin(SD_CS, sharedSPI)); reclaim the bus through it -- not the
+// global SPI object -- so freeing/re-initing the bus for a redraw doesn't leave
+// the SD on a dead handle (which made every wardrive/SD write fail).
+extern SPIClass sharedSPI;
+
 namespace {
 constexpr uint32_t kRefreshMs = 500;
 constexpr uint8_t kRowHeight = 13;
@@ -20,8 +26,8 @@ void TDongleDisplay::begin() {
   delay(500);
   // The SD card's sharedSPI.begin() already claimed this bus; point it back at
   // the TFT pins before init or the ST7735 never receives its setup commands.
-  SPI.end();
-  SPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
+  sharedSPI.end();
+  sharedSPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
             T_DONGLE_SPI_MOSI_PIN, -1);
   tft.init();
   tft.setRotation(3);
@@ -59,8 +65,8 @@ bool TDongleDisplay::update(uint32_t now, const WiFiScan& scan) {
       static_cast<int32_t>(now - init_time) >=
           static_cast<int32_t>((reinit_count + 1) * 1200)) {
     reinit_count++;
-    SPI.end();
-    SPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
+    sharedSPI.end();
+    sharedSPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
               T_DONGLE_SPI_MOSI_PIN, -1);
     pinMode(kBacklightPin, OUTPUT);
     digitalWrite(kBacklightPin, LOW);
@@ -91,8 +97,8 @@ bool TDongleDisplay::update(uint32_t now, const WiFiScan& scan) {
 
   // LED updates bit-bang the TFT's MOSI/MISO pins. Reclaim the shared bus only
   // when a redraw is required, then let the caller write the LED state last.
-  SPI.end();
-  SPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
+  sharedSPI.end();
+  sharedSPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
             T_DONGLE_SPI_MOSI_PIN, -1);
 
   if (ap_changed) {
@@ -132,8 +138,8 @@ bool TDongleDisplay::update(uint32_t now, const WiFiScan& scan) {
 
 void TDongleDisplay::selfTest() {
   Serial.println(F("[TFT] self-test start"));
-  SPI.end();
-  SPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
+  sharedSPI.end();
+  sharedSPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
             T_DONGLE_SPI_MOSI_PIN, -1);
   pinMode(kBacklightPin, OUTPUT);
   digitalWrite(kBacklightPin, LOW);  // on, if backlight is active-low
