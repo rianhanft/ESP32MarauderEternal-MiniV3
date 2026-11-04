@@ -8,11 +8,14 @@
 #include "soc/soc.h"
 #include "soc/usb_serial_jtag_reg.h"
 
-// The microSD card and the TFT share one SPI bus. The SD is bound to this
-// instance (SD.begin(SD_CS, sharedSPI)); reclaim the bus through it -- not the
-// global SPI object -- so freeing/re-initing the bus for a redraw doesn't leave
-// the SD on a dead handle (which made every wardrive/SD write fail).
-extern SPIClass sharedSPI;
+// The TFT, microSD and APA102 LED share one SPI bus (SCLK 6 / MOSI 2 / MISO 7).
+// TFT_eSPI drives the panel through the GLOBAL `SPI` object; the SD card is
+// bound to a *copy* of it (sharedSPI) in the main sketch. Matching the official
+// Marauder firmware, the display reclaims the bus for a redraw by re-initing the
+// GLOBAL `SPI` object only -- never sharedSPI. Tearing down sharedSPI (the
+// handle SD is actively bound to) is what made every wardrive/PCAP write fail
+// with "Failed to open file"; re-initing the global SPI the TFT uses leaves the
+// SD on a live handle.
 
 namespace {
 constexpr uint32_t kRefreshMs = 500;
@@ -24,11 +27,8 @@ void TDongleDisplay::begin() {
   pinMode(kBacklightPin, OUTPUT);
   digitalWrite(kBacklightPin, HIGH);
   delay(500);
-  // The SD card's sharedSPI.begin() already claimed this bus; point it back at
-  // the TFT pins before init or the ST7735 never receives its setup commands.
-  sharedSPI.end();
-  sharedSPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
-            T_DONGLE_SPI_MOSI_PIN, -1);
+  // tft.init() brings up the global SPI bus (spi.begin(SCLK, MISO, MOSI)) on its
+  // own, so there is no manual bus juggling here -- just like the official code.
   tft.init();
   tft.setRotation(3);
   tft.fillScreen(TFT_BLACK);
@@ -38,8 +38,6 @@ void TDongleDisplay::begin() {
   tft.drawString("MARAUDER CLI", 2, 1);
   tft.drawFastHLine(0, 11, tft.width(), TFT_DARKGREY);
   digitalWrite(kBacklightPin, LOW);
-  init_time = millis();
-  reinit_count = 0;
 }
 
 void TDongleDisplay::drawValue(uint8_t row, const char* label, int value, uint16_t color) {
@@ -56,32 +54,6 @@ bool TDongleDisplay::update(uint32_t now, const WiFiScan& scan) {
   last_update = now;
   bool drew = false;
 
-  // Connecting the web remote triggers a partial reset (rst 0x15) that the
-  // one-shot begin() can't always bring the panel back from -- the screen stays
-  // grey while attached. Re-initialize the panel a few times over the first few
-  // seconds of each boot (a connect causes a reboot, so this runs after it too)
-  // so the display self-heals instead of staying blank.
-  if (reinit_count < 1 &&
-      static_cast<int32_t>(now - init_time) >=
-          static_cast<int32_t>((reinit_count + 1) * 1200)) {
-    reinit_count++;
-    sharedSPI.end();
-    sharedSPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
-              T_DONGLE_SPI_MOSI_PIN, -1);
-    pinMode(kBacklightPin, OUTPUT);
-    digitalWrite(kBacklightPin, LOW);
-    tft.init();
-    tft.setRotation(3);
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextFont(1);
-    tft.setTextSize(1);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.drawString("MARAUDER CLI", 2, 1);
-    tft.drawFastHLine(0, 11, tft.width(), TFT_DARKGREY);
-    last_ap_count = -1; last_station_count = -1; last_ble_count = -1;
-    last_channel = -1; last_mode = -1;  // force every value to redraw below
-  }
-
   const int ap_count = static_cast<int>(scan.retainedAccessPointCount());
   const int station_count = static_cast<int>(scan.retainedStationCount());
   const int ble_count = static_cast<int>(scan.retainedBleDeviceCount());
@@ -95,10 +67,11 @@ bool TDongleDisplay::update(uint32_t now, const WiFiScan& scan) {
     return false;
   }
 
-  // LED updates bit-bang the TFT's MOSI/MISO pins. Reclaim the shared bus only
-  // when a redraw is required, then let the caller write the LED state last.
-  sharedSPI.end();
-  sharedSPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
+  // LED updates bit-bang the TFT's MOSI/MISO pins. Reclaim the shared bus (the
+  // GLOBAL SPI object TFT_eSPI uses, NOT the SD's sharedSPI) only when a redraw
+  // is required, then let the caller write the LED state last.
+  SPI.end();
+  SPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
             T_DONGLE_SPI_MOSI_PIN, -1);
 
   if (ap_changed) {
@@ -138,8 +111,9 @@ bool TDongleDisplay::update(uint32_t now, const WiFiScan& scan) {
 
 void TDongleDisplay::selfTest() {
   Serial.println(F("[TFT] self-test start"));
-  sharedSPI.end();
-  sharedSPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
+  // Reclaim the global SPI bus for the TFT (same object TFT_eSPI uses).
+  SPI.end();
+  SPI.begin(T_DONGLE_SPI_SCLK_PIN, T_DONGLE_SPI_MISO_PIN,
             T_DONGLE_SPI_MOSI_PIN, -1);
   pinMode(kBacklightPin, OUTPUT);
   digitalWrite(kBacklightPin, LOW);  // on, if backlight is active-low
