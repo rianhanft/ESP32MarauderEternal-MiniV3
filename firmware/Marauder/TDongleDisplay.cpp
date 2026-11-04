@@ -5,6 +5,8 @@
 #include "WiFiScan.h"
 #include "TDongleStats.h"
 #include <SPI.h>
+#include "soc/soc.h"
+#include "soc/usb_serial_jtag_reg.h"
 
 namespace {
 constexpr uint32_t kRefreshMs = 500;
@@ -53,7 +55,7 @@ bool TDongleDisplay::update(uint32_t now, const WiFiScan& scan) {
   // grey while attached. Re-initialize the panel a few times over the first few
   // seconds of each boot (a connect causes a reboot, so this runs after it too)
   // so the display self-heals instead of staying blank.
-  if (reinit_count < 4 &&
+  if (reinit_count < 1 &&
       static_cast<int32_t>(now - init_time) >=
           static_cast<int32_t>((reinit_count + 1) * 1200)) {
     reinit_count++;
@@ -170,6 +172,19 @@ void TDongleDisplay::selfTest() {
   delay(2000);
   digitalWrite(kBacklightPin, LOW);
   Serial.println(F("[TFT] self-test done"));
+}
+
+void tDongleSetUsbAutoReset(bool enabled) {
+  // USB_SERIAL_JTAG_CHIP_RST_REG bit USB_UART_CHIP_RST_DIS (bit 2): set it and
+  // the chip ignores the host's DTR/RTS reset (so connecting the web remote no
+  // longer reboots the dongle and blanks the panel); clear it and the host can
+  // reset the chip, which the flasher needs to enter download mode.
+  volatile uint32_t* reg = reinterpret_cast<volatile uint32_t*>(
+      USB_SERIAL_JTAG_CHIP_RST_REG);
+  if (enabled)
+    *reg = 0;  // allow the USB-triggered reset (needed to flash)
+  else
+    *reg = USB_SERIAL_JTAG_USB_UART_CHIP_RST_DIS;  // ignore it (protect screen)
 }
 
 #endif

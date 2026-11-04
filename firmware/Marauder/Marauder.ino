@@ -45,6 +45,7 @@ https://www.online-utility.org/image/convert/to/XBM
 
 #ifdef HAS_T_DONGLE_DISPLAY
   #include "TDongleDisplay.h"
+  #include <Preferences.h>
 #endif
 
 #ifdef HAS_BATTERY
@@ -352,6 +353,19 @@ void setup()
   #else
     while(!Serial)
       delay(10);
+  #endif
+
+  #ifdef HAS_T_DONGLE_DISPLAY
+    {
+      // Make the C5 ignore the host's DTR/RTS reset so connecting the web remote
+      // no longer reboots the dongle / blanks the screen. Persisted; 'usbreset
+      // on' flips it back when you need to flash firmware.
+      Preferences _tdp;
+      _tdp.begin("tdongle", true);
+      const bool _allowUsbReset = _tdp.getBool("usbreset", false);
+      _tdp.end();
+      tDongleSetUsbAutoReset(_allowUsbReset);
+    }
   #endif
 
   #ifdef HAS_C5_SD

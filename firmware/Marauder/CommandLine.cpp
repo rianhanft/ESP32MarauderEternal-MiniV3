@@ -9,6 +9,7 @@
 
 #ifdef HAS_T_DONGLE_DISPLAY
   #include "TDongleDisplay.h"
+  #include <Preferences.h>
   extern TDongleDisplay t_dongle_display;
 #endif
 
@@ -340,6 +341,7 @@ void CommandLine::runCommand(String input) {
     Serial.println(HELP_NYAN_BLE_CMD);
     #ifdef HAS_T_DONGLE_DISPLAY
       Serial.println(HELP_TFT_TEST_CMD);
+      Serial.println(HELP_USB_RESET_CMD);
     #endif
     Serial.println(HELP_STOPSCAN_CMD);
     #ifdef HAS_GPS
@@ -1081,6 +1083,22 @@ void CommandLine::runCommand(String input) {
     #ifdef HAS_T_DONGLE_DISPLAY
     else if (cmd_args.get(0) == TFT_TEST_CMD) {
       t_dongle_display.selfTest();
+    }
+    else if (cmd_args.get(0) == USB_RESET_CMD) {
+      const bool on = cmd_args.size() >= 2 && cmd_args.get(1) == "on";
+      Preferences _tdp;
+      _tdp.begin("tdongle", false);
+      _tdp.putBool("usbreset", on);
+      _tdp.end();
+      tDongleSetUsbAutoReset(on);
+      if (on)
+        Serial.println(F("USB reset ENABLED. You can flash now. The screen will "
+                         "blank when a tool connects; run 'usbreset off' (then "
+                         "replug) to protect it again."));
+      else
+        Serial.println(F("USB reset DISABLED. The screen now survives "
+                         "connecting. To flash firmware later, run 'usbreset "
+                         "on' first."));
     }
     #endif
     // Raw sniff

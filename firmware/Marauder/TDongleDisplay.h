@@ -28,4 +28,10 @@ class TDongleDisplay {
   void drawValue(uint8_t row, const char* label, int value, uint16_t color);
 };
 
+// Enable/disable the ESP32-C5 USB-Serial-JTAG chip reset the host triggers via
+// DTR/RTS. enabled=true lets the host reset the chip (needed to enter download
+// mode to flash); enabled=false makes the chip ignore it, so connecting the web
+// remote no longer reboots the dongle and blanks the panel.
+void tDongleSetUsbAutoReset(bool enabled);
+
 #endif
