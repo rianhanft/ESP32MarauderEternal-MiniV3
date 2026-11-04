@@ -239,7 +239,7 @@ MENU = [
       {"t": "Deauth Targeted  ·sel. stations", "c": "red", "x": "attack -t deauth -c"},
       {"t": "Bad Msg Targeted  ·sel. stations", "c": "yel", "x": "attack -t badmsg -c"},
       {"t": "Assoc Sleep Targeted  ·sel. stations", "c": "mag", "x": "attack -t sleep -c"},
-      {"t": "Evil Portal (pick AP)", "c": "org", "pick": "ep"},
+      {"t": "Evil Portal (HTML + AP)", "c": "org", "pick": "ep"},
       {"t": "Karma (SSID idx)", "c": "org", "x": "karma -p {}", "p": "probe SSID index"},
       {"t": "Stop Attack", "c": "red", "x": "stopscan"},
     ]},
@@ -638,6 +638,8 @@ PAGE = r"""<!doctype html>
 
   // ---- AP / SSID picker ----  (mode: "ap"/"ssid" = select targets, "ep" = host Evil Portal)
   let pickerMode = "ap";
+  let lastHtml = "";       // last Evil Portal .html armed (shown on the EP picker)
+  let htmlReturn = null;   // where the HTML picker returns after choosing a file
   function openPicker(mode){
     pickerMode = mode || "ap";
     $("#title").textContent = pickerMode==="ep" ? "Evil Portal: pick AP" : "Select APs";
@@ -672,6 +674,10 @@ PAGE = r"""<!doctype html>
     // action bar
     const bar = document.createElement("div"); bar.className = "pbar";
     bar.appendChild(mkBtn("⟳ Refresh", ()=>openPicker(pickerMode)));
+    if(pickerMode==="ep"){
+      bar.appendChild(mkBtn(lastHtml ? "📄 "+lastHtml : "📄 Pick HTML",
+                            ()=>openHtmlPicker(()=>openPicker("ep"))));
+    }
     if(pickerMode!=="ep"){
       bar.appendChild(mkBtn("Select ALL", ()=>applySel(picker.map((_,i)=>i), true)));
       bar.appendChild(mkBtn("Clear ALL", ()=>applySel(picker.map((_,i)=>i), false)));
@@ -682,7 +688,9 @@ PAGE = r"""<!doctype html>
       return;
     }
     if(pickerMode==="ep"){
-      list.appendChild(lbl("Tap the AP to host the Evil Portal on"));
+      list.appendChild(lbl(lastHtml
+        ? ("HTML: " + lastHtml + " — now tap the AP to host it on")
+        : "Tip: tap “📄 Pick HTML” above to choose a page, then tap the AP to host on"));
       picker.forEach((a,i)=>{
         const el = pickRow("📶  " + (a.ssid||"(hidden)"), "CH"+a.ch+"  "+a.rssi+"dBm", false);
         el.onclick = () => hostPortal(i);
@@ -725,7 +733,8 @@ PAGE = r"""<!doctype html>
   function mkBtn(t,fn){ const b=document.createElement("button"); b.className="pbtn"; b.textContent=t; b.onclick=fn; return b; }
 
   // ---- Evil Portal HTML picker ----
-  function openHtmlPicker(){
+  function openHtmlPicker(onReturn){
+    htmlReturn = onReturn || null;
     $("#title").textContent = "Evil Portal HTML";
     const list = $("#list"); list.innerHTML = "";
     list.appendChild(rowEl("Reading SD card…", "c-cy", "", ""));
@@ -735,9 +744,11 @@ PAGE = r"""<!doctype html>
   }
   function renderHtmls(files){
     const list = $("#list"); list.innerHTML = "";
-    const back = rowEl("‹ Back", "back", "", ""); back.onclick = () => render(); list.appendChild(back);
+    const back = rowEl("‹ Back", "back", "", "");
+    back.onclick = () => { const r = htmlReturn; htmlReturn = null; (r ? r() : render()); };
+    list.appendChild(back);
     const bar = document.createElement("div"); bar.className = "pbar";
-    bar.appendChild(mkBtn("⟳ Refresh", ()=>openHtmlPicker()));
+    bar.appendChild(mkBtn("⟳ Refresh", ()=>openHtmlPicker(htmlReturn)));
     list.appendChild(bar);
     list.appendChild(lbl("Tap an .html to arm Evil Portal with it"));
     if(!files.length){
@@ -746,8 +757,10 @@ PAGE = r"""<!doctype html>
     }
     files.forEach(f => {
       const el = rowEl(f, "c-org", "set", "📄");
-      el.onclick = () => { send("evilportal -c sethtml " + f);
-        setStat("armed: " + f + "  (now WiFi ▸ Attacks ▸ Evil Portal)"); };
+      el.onclick = () => { send("evilportal -c sethtml " + f); lastHtml = f;
+        setStat("armed: " + f);
+        const r = htmlReturn; htmlReturn = null;
+        if(r) r(); else setStat("armed: " + f + "  (now WiFi ▸ Attacks ▸ Evil Portal)"); };
       list.appendChild(el);
     });
   }
