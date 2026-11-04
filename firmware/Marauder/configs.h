@@ -614,9 +614,16 @@
   #ifdef MARAUDER_T_DONGLE_C5
     #define HAS_BT
     #define HAS_T_DONGLE_DISPLAY
-    #define HAS_T_DONGLE_LED
-    #define T_DONGLE_LED_DATA_PIN 2
-    #define T_DONGLE_LED_CLOCK_PIN 6
+    // APA102 status LED DISABLED on purpose: on the T-Dongle C5 it is wired to
+    // GPIO2 and GPIO6 -- which are the SD card's MOSI and SCK lines. Driving the
+    // LED bit-bangs those pins into GPIO mode and leaves them there, so the next
+    // SD access (open/append/ls) finds the bus misconfigured and fails ("Failed
+    // to open file", empty Evil Portal HTML list). Keeping the LED off leaves the
+    // shared SPI bus clean so the SD/wardrive work. (The Mini V3 has no such LED,
+    // which is why its SD works with the identical HAS_C5_SD code.)
+    //#define HAS_T_DONGLE_LED
+    //#define T_DONGLE_LED_DATA_PIN 2
+    //#define T_DONGLE_LED_CLOCK_PIN 6
     #define T_DONGLE_TFT_CS_PIN 10
     #define T_DONGLE_SPI_SCLK_PIN 6
     #define T_DONGLE_SPI_MISO_PIN 7
