@@ -181,10 +181,17 @@ void tDongleSetUsbAutoReset(bool enabled) {
   // reset the chip, which the flasher needs to enter download mode.
   volatile uint32_t* reg = reinterpret_cast<volatile uint32_t*>(
       USB_SERIAL_JTAG_CHIP_RST_REG);
+  volatile uint32_t* upd = reinterpret_cast<volatile uint32_t*>(
+      USB_SERIAL_JTAG_CONFIG_UPDATE_REG);
   if (enabled)
     *reg = 0;  // allow the USB-triggered reset (needed to flash)
   else
     *reg = USB_SERIAL_JTAG_USB_UART_CHIP_RST_DIS;  // ignore it (protect screen)
+  // The USB-Serial-JTAG latches config-register changes only on this strobe;
+  // without it the bit above silently doesn't take effect.
+  *upd = USB_SERIAL_JTAG_CONFIG_UPDATE;
+  Serial.printf("[USB] chip_rst=0x%08lx rst_dis=%s\n", (unsigned long)*reg,
+                (*reg & USB_SERIAL_JTAG_USB_UART_CHIP_RST_DIS) ? "SET" : "clear");
 }
 
 #endif
