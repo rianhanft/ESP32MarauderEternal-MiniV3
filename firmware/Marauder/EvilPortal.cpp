@@ -494,6 +494,13 @@ void EvilPortal::startPortal() {
   // wait for flipper input to get config index
   this->startAP();
 
+  // Reset the live status HUD for this portal session.
+  this->num_creds = 0;
+  this->last_cred = "";
+  this->portal_start_ms = millis();
+  this->portal_ui_ms = 0;
+  this->portal_needs_clear = true;
+
   this->runServer = true;
 }
 
@@ -542,8 +549,105 @@ void EvilPortal::main(uint8_t scan_mode) {
 
     Serial.print(line);
     buffer_obj.append(line);
-    #ifdef HAS_SCREEN
-        this->sendToDisplay(line);
-    #endif
+
+    // Feed the live status HUD instead of scrolling a console line over it.
+    this->num_creds++;
+    this->last_cred = this->user_name;
+  }
+
+  #ifdef HAS_SCREEN
+    if (static_cast<int32_t>(millis() - this->portal_ui_ms) >= 0) {
+      this->portal_ui_ms = millis() + 700;
+      this->drawPortalStatus();
+    }
+  #endif
+}
+
+#ifdef HAS_SCREEN
+// Clean live status screen for the active Evil Portal, matching the attack HUD
+// style: amber header, hosted SSID, armed HTML page, connected client count, a
+// big captured-credential count, elapsed time, and the last captured identity.
+// Display only. Wipes the body once (first frame) then updates fields in place
+// with background-filled text, so it is cheap and does not flicker.
+void EvilPortal::drawPortalStatus() {
+  const uint32_t now = millis();
+  const int W = display_obj.tft.width();
+  const int H = display_obj.tft.height();
+  #ifdef HAS_MINI_SCREEN
+    const int pad = 2, barH = 13, lh = 11, bigFont = 2;
+  #else
+    const int pad = 5, barH = 18, lh = 16, bigFont = 4;
+  #endif
+  const int topY = 16;
+  const uint16_t accent = TFT_ORANGE;
+
+  const int bodyTop = topY + barH;
+  if (this->portal_needs_clear) {
+    display_obj.tft.fillRect(0, bodyTop, W, H - bodyTop, TFT_BLACK);
+    this->portal_needs_clear = false;
+  }
+
+  // Header bar.
+  display_obj.tft.setTextDatum(TL_DATUM);
+  display_obj.tft.setTextSize(1);
+  display_obj.tft.fillRect(0, topY, W, barH, accent);
+  display_obj.tft.setTextColor(TFT_BLACK, accent);
+  display_obj.tft.drawString("EVIL PORTAL", pad, topY + (barH - 8) / 2, 1);
+  bool blink = ((now / 500) & 1);
+  display_obj.tft.setTextColor(blink ? TFT_BLACK : accent, accent);
+  display_obj.tft.drawString("AP", W - pad - 12, topY + (barH - 8) / 2, 1);
+
+  int y = bodyTop + pad;
+  const int lineChars = (W - 2 * pad) / 6;
+  auto line = [&](const String& s, uint16_t color, int yy) {
+    String t = s;
+    if ((int)t.length() > lineChars) t = t.substring(0, lineChars);
+    while ((int)t.length() < lineChars) t += ' ';
+    display_obj.tft.setTextColor(color, TFT_BLACK);
+    display_obj.tft.drawString(t, pad, yy, 1);
+  };
+
+  line(String("SSID: ") + apName, TFT_WHITE, y); y += lh;
+  line(String("Page: ") + this->target_html_name, TFT_CYAN, y); y += lh;
+  #ifndef HAS_MINI_SCREEN
+    line(String("Clients: ") + (int)WiFi.softAPgetStationNum(), TFT_WHITE, y); y += lh;
+  #endif
+
+  y += 2;
+  display_obj.tft.drawFastHLine(pad, y, W - 2 * pad, TFT_DARKGREY);
+  y += pad + 2;
+
+  // Big captured-credential count.
+  display_obj.tft.setTextColor(TFT_GREEN, TFT_BLACK);
+  display_obj.tft.drawString(String(this->num_creds) + " ", pad, y, bigFont);
+  int bigH = display_obj.tft.fontHeight(bigFont);
+  #ifndef HAS_MINI_SCREEN
+    display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    display_obj.tft.drawString("CAPTURED", pad, y + bigH, 1);
+    y += bigH + lh + 2;
+  #else
+    y += bigH + 2;
+  #endif
+
+  // Clients (mini) + elapsed.
+  const uint32_t elapsed = (now - this->portal_start_ms) / 1000;
+  char et[12];
+  snprintf(et, sizeof(et), "%02lu:%02lu",
+           (unsigned long)(elapsed / 60), (unsigned long)(elapsed % 60));
+  #ifdef HAS_MINI_SCREEN
+    line(String("Cli ") + (int)WiFi.softAPgetStationNum(), TFT_WHITE, y);
+  #else
+    line(String("Clients ") + (int)WiFi.softAPgetStationNum(), TFT_WHITE, y);
+  #endif
+  display_obj.tft.setTextDatum(TR_DATUM);
+  display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  display_obj.tft.drawString(String(et), W - pad, y, 1);
+  display_obj.tft.setTextDatum(TL_DATUM);
+  y += lh;
+
+  // Last captured identity.
+  if (this->num_creds > 0) {
+    line(String("last: ") + this->last_cred, TFT_DARKGREY, y);
   }
 }
+#endif

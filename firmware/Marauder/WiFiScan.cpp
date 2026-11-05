@@ -3206,6 +3206,7 @@ void WiFiScan::startWiFiAttacks(uint8_t scan_mode, uint16_t color, const char* t
   this->attack_tx_rate = 0;
   this->hud_view = 0;
   this->hud_view_ms = millis();
+  this->hud_needs_clear = true;
   esp_wifi_init(&cfg);
   #ifdef HAS_IDF_3
     esp_wifi_set_country(&country);
@@ -12412,10 +12413,28 @@ void WiFiScan::drawAttackStatus() {
     display_obj.tft.setTextColor(blink ? TFT_BLACK : accent, accent);
     display_obj.tft.drawString("TX", W - pad - 12, topY + (barH - 8) / 2, 1);
 
-    // Body.
-    int y = topY + barH + pad;
-    display_obj.tft.fillRect(0, y, W, H - y, TFT_BLACK);
+    // Body. Wipe the region below the header only on the FIRST frame of this
+    // attack (clears the old target-filter screen); after that each field is
+    // redrawn in place with background-filled, space-padded text, so the update
+    // is cheap and the attack does not stutter mid-sweep.
+    const int bodyTop = topY + barH;
+    if (this->hud_needs_clear) {
+      display_obj.tft.fillRect(0, bodyTop, W, H - bodyTop, TFT_BLACK);
+      this->hud_needs_clear = false;
+    }
+    int y = bodyTop + pad;
+    const int lineChars = (W - 2 * pad) / 6;  // font-1 glyph is ~6px wide
     display_obj.tft.setTextSize(1);
+    display_obj.tft.setTextDatum(TL_DATUM);
+    // One full-width line: truncate or space-pad to the line width so whatever
+    // was there before is overwritten without a per-field fillRect.
+    auto line = [&](const String& s, uint16_t color, int yy) {
+      String t = s;
+      if ((int)t.length() > lineChars) t = t.substring(0, lineChars);
+      while ((int)t.length() < lineChars) t += ' ';
+      display_obj.tft.setTextColor(color, TFT_BLACK);
+      display_obj.tft.drawString(t, pad, yy, 1);
+    };
 
     if (category == 0) {
       int selCount = 0; String ssid; char bssid[18] = {0}; int ch = 0, rssi = 0;
@@ -12431,44 +12450,33 @@ void WiFiScan::drawAttackStatus() {
         selCount++;
       }
       if (selCount == 0) {
-        display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-        display_obj.tft.drawString("No networks selected", pad, y, 1); y += lh;
+        line("No networks selected", TFT_WHITE, y); y += lh;
       } else {
         if (ssid.length() == 0) ssid = "(hidden)";
-        int maxc = (W - 2 * pad) / 6;
-        if (maxc > 2 && (int)ssid.length() > maxc) ssid = ssid.substring(0, maxc - 1) + "~";
-        display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-        display_obj.tft.drawString(ssid, pad, y, 1); y += lh;
+        line(ssid, TFT_WHITE, y); y += lh;
         #ifndef HAS_MINI_SCREEN
-          display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
-          display_obj.tft.drawString(bssid, pad, y, 1); y += lh;
+          line(String(bssid), TFT_CYAN, y); y += lh;
         #endif
-        display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-        display_obj.tft.drawString(String("CH ") + ch + "   " + rssi + " dBm", pad, y, 1); y += lh;
-        display_obj.tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-        display_obj.tft.drawString(String("hitting ") + (this->hud_view + 1) + " / " + selCount, pad, y, 1); y += lh;
+        line(String("CH ") + ch + "   " + rssi + " dBm", TFT_WHITE, y); y += lh;
+        line(String("hitting ") + (this->hud_view + 1) + " / " + selCount, TFT_ORANGE, y); y += lh;
         if (now - this->hud_view_ms >= 1200) {
           this->hud_view_ms = now;
           this->hud_view = (this->hud_view + 1) % selCount;
         }
       }
     } else if (category == 2) {
-      display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-      display_obj.tft.drawString("Target", pad, y, 1); y += lh;
-      display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
-      display_obj.tft.drawString(this->dst_mac, pad, y, 1); y += lh;
-      display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-      display_obj.tft.drawString(String("CH ") + this->set_channel, pad, y, 1); y += lh;
+      line("Target", TFT_WHITE, y); y += lh;
+      line(this->dst_mac, TFT_CYAN, y); y += lh;
+      line(String("CH ") + this->set_channel, TFT_WHITE, y); y += lh;
     } else {
       int n = 0;
       if (this->currentScanMode == WIFI_ATTACK_BEACON_LIST) n = ssids->size();
       else if (this->currentScanMode == WIFI_ATTACK_AP_SPAM) {
         for (int i = 0; i < access_points->size(); i++) if (access_points->get(i).selected) n++;
       }
-      display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-      display_obj.tft.drawString("Source: SSID flood", pad, y, 1); y += lh;
-      if (n > 0) { display_obj.tft.drawString(String("SSIDs: ") + n, pad, y, 1); y += lh; }
-      display_obj.tft.drawString(String("CH ") + this->set_channel, pad, y, 1); y += lh;
+      line("Source: SSID flood", TFT_WHITE, y); y += lh;
+      if (n > 0) { line(String("SSIDs: ") + n, TFT_WHITE, y); y += lh; }
+      line(String("CH ") + this->set_channel, TFT_WHITE, y); y += lh;
     }
 
     // Divider.
@@ -12476,9 +12484,10 @@ void WiFiScan::drawAttackStatus() {
     display_obj.tft.drawFastHLine(pad, y, W - 2 * pad, TFT_DARKGREY);
     y += pad + 2;
 
-    // Big running packet count.
+    // Big running packet count (grows only, so no stale digits; trailing space
+    // gives a clearing margin).
     display_obj.tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    display_obj.tft.drawString(String(total), pad, y, bigFont);
+    display_obj.tft.drawString(String(total) + " ", pad, y, bigFont);
     int bigH = display_obj.tft.fontHeight(bigFont);
     #ifndef HAS_MINI_SCREEN
       display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
@@ -12488,13 +12497,14 @@ void WiFiScan::drawAttackStatus() {
       y += bigH + 2;
     #endif
 
-    // Rate + elapsed.
+    // Rate + elapsed (rate fills the line so a shrinking value self-clears;
+    // elapsed is drawn right-aligned on top).
     char et[12];
     snprintf(et, sizeof(et), "%02lu:%02lu",
              (unsigned long)(elapsed / 60), (unsigned long)(elapsed % 60));
-    display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    display_obj.tft.drawString(String(this->attack_tx_rate) + " pkt/s", pad, y, 1);
+    line(String(this->attack_tx_rate) + " pkt/s", TFT_WHITE, y);
     display_obj.tft.setTextDatum(TR_DATUM);
+    display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
     display_obj.tft.drawString(String(et), W - pad, y, 1);
     display_obj.tft.setTextDatum(TL_DATUM);
 

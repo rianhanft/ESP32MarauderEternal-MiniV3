@@ -423,6 +423,7 @@ class WiFiScan
     uint16_t attack_tx_rate = 0;      // packets/sec (smoothed, for display)
     uint8_t  hud_view = 0;            // which selected AP the HUD is cycling on
     uint32_t hud_view_ms = 0;         // AP-cycle timer
+    bool     hud_needs_clear = false; // full-wipe the body on the first HUD frame
     uint32_t remote_id_last_render_ms = 0;
     uint8_t remote_id_schedule_step = 0;
     uint8_t remote_id_beacon_channel_index = 0;
