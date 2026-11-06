@@ -5156,12 +5156,13 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         };
         attack_plan.reopenTargets();
       });
-      // Bad Msg -> AP-targeted (per-AP station profiles arrive in Stage 2)
+      // Bad Msg -> flood: pick APs/SSIDs, then hit every known client of each
+      // selected AP (like Deauth Flood). Per-client targeting lives in "Bad Msg
+      // Targeted". AP scope -> Choose Targets -> Review -> Start, no Target Mode.
       this->addNodes(menu, "Bad Msg", TFTRED, DEAUTH_SNIFF, [this]() {
-        this->beginAttackPlan("Bad Msg", TFTRED, AttackScope::AP_STATIONS, [this]() {
+        this->beginAttackPlan("Bad Msg", TFTRED, AttackScope::AP, [this]() {
           display_obj.clearScreen(); this->drawStatusBar();
           wifi_scan_obj.StartScan(WIFI_ATTACK_BAD_MSG, TFT_RED);
-          wifi_scan_obj.station_profile = true;
         });
       });
       this->addNodes(menu, "Bad Msg Targeted", TFTYELLOW, DEAUTH_SNIFF, [this]() {
@@ -5170,11 +5171,13 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
           wifi_scan_obj.StartScan(WIFI_ATTACK_BAD_MSG_TARGETED, TFT_YELLOW);
         });
       });
+      // Assoc Sleep -> flood: pick APs/SSIDs, then hit every known client of each
+      // selected AP (like Deauth Flood). Per-client targeting lives in "Assoc
+      // Sleep Targ". AP scope -> Choose Targets -> Review -> Start, no Target Mode.
       this->addNodes(menu, "Assoc Sleep", TFTRED, DEAUTH_SNIFF, [this]() {
-        this->beginAttackPlan("Assoc Sleep", TFTRED, AttackScope::AP_STATIONS, [this]() {
+        this->beginAttackPlan("Assoc Sleep", TFTRED, AttackScope::AP, [this]() {
           display_obj.clearScreen(); this->drawStatusBar();
           wifi_scan_obj.StartScan(WIFI_ATTACK_SLEEP, TFT_RED);
-          wifi_scan_obj.station_profile = true;
         });
       });
       this->addNodes(menu, "Assoc Sleep Targ", TFTMAGENTA, DEAUTH_SNIFF, [this]() {
