@@ -87,6 +87,15 @@ g++ -std=c++17 -Wall -Wextra -Werror \
   "${PROJECT_DIR}/tests/native/test_ota.cpp" \
   -o "${TEST_DIR}/test_ota"
 "${TEST_DIR}/test_ota"
+
+# Python-side native tests: tools/Remote.py parsing + helpers. The test stubs
+# pyserial itself, so it needs no dependencies and never opens a serial port.
+# Skipped (not failed) if python3 isn't on the runner.
+if command -v python3 >/dev/null 2>&1; then
+  python3 -I "${PROJECT_DIR}/tests/python/test_remote.py"
+else
+  echo "python3 not found -- skipping Remote.py tests"
+fi
 g++ -std=c++17 -Wall -Wextra -Werror \
   -I"${PROJECT_DIR}/firmware/Marauder" \
   "${PROJECT_DIR}/tests/native/test_recon.cpp" \
