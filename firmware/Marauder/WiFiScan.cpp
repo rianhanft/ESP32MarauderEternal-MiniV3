@@ -13257,7 +13257,10 @@ void WiFiScan::drawFoxHuntMeter() {
     const uint16_t trackCol = 0x2124;  // dim slate track
 
     if (this->fox_needs_clear) {       // wipe the selection screen once
-      display_obj.tft.fillScreen(TFT_BLACK);
+      // Clear only BELOW the status bar -- fillScreen() would wipe the top
+      // status bar too, which then repaints element-by-element on its own timer
+      // and flashes black bands across the top for a moment.
+      display_obj.tft.fillRect(0, STATUS_BAR_WIDTH, W, H - STATUS_BAR_WIDTH, TFT_BLACK);
       this->fox_needs_clear = false;
     }
 
