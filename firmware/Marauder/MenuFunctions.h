@@ -240,7 +240,9 @@ class MenuFunctions
     void buildAttackTargets();              // "Choose Targets" (AP / SSID multi-select)
     void buildAttackSsidSelect();           // "Select by SSID": add every AP of one SSID
     void buildAttackHtmlSelect();           // Evil Portal: pick the captive-page HTML file
-    void buildAttackStationProfile(int apIndex);  // per-AP station mode + station picks
+    void buildAttackTargetMode();           // "Target Mode": Broadcast / All / Pick / Remove
+    void buildAttackPickStations();         // "Pick Stations": per-client multi-select
+    void setSelectedApStations(bool selected);  // (de)select every client of in-profile APs
     void buildAttackReview();               // "Review Attack" (+ conditional Start)
     uint16_t attackTargetCount() const;     // # selected APs / SSIDs for the plan
     bool attackPlanValid() const;
@@ -295,7 +297,8 @@ class MenuFunctions
     Menu wifiAttackMenu;
     Menu attackTargetsMenu;   // guided workflow: "Choose Targets"
     Menu attackReviewMenu;    // guided workflow: "Review Attack"
-    Menu attackStationMenu;   // guided workflow: per-AP station profile
+    Menu attackStationMenu;   // guided workflow: "Target Mode" (Broadcast/All/Pick/Remove)
+    Menu attackPickMenu;      // guided workflow: "Pick Stations" (per-client toggles)
     Menu attackSsidMenu;      // guided workflow: "Select by SSID"
     /*#ifdef HAS_GPS
       Menu wardrivingMenu;

@@ -2313,6 +2313,7 @@ void MenuFunctions::RunSetup()
   attackTargetsMenu.list = new LinkedList<MenuNode>();
   attackReviewMenu.list = new LinkedList<MenuNode>();
   attackStationMenu.list = new LinkedList<MenuNode>();
+  attackPickMenu.list = new LinkedList<MenuNode>();
   attackSsidMenu.list = new LinkedList<MenuNode>();
 
   // WiFi HTML menu stuff
@@ -5675,8 +5676,13 @@ void MenuFunctions::buildAttackTargets() {
   this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() {
     this->changeMenu(attack_origin_menu ? attack_origin_menu : &wifiAttackMenu, true);
   });
-  this->addNodes(m, "Review / Continue", TFTGREEN, ATTACKS, [this]() {
-    this->buildAttackReview();
+  this->addNodes(m, "Review / Continue", TFTGREEN, ATTACKS, [this, stationScope]() {
+    // Station-targeted attacks (Deauth / Bad Msg / Assoc Sleep) go through the
+    // Target Mode screen to pick Broadcast / All / specific clients; everything
+    // else jumps straight to Review. With nothing selected yet, fall through to
+    // Review so it can prompt "Select targets first".
+    if (stationScope && this->attackTargetCount() > 0) this->buildAttackTargetMode();
+    else this->buildAttackReview();
   });
   this->addNodes(m, "Clear Profile", TFTORANGE, CLEAR_ICO, [this, apScope, stationScope]() {
     if (apScope) {
@@ -5710,14 +5716,22 @@ void MenuFunctions::buildAttackTargets() {
 
   if (stationScope) {
     // One row per AP, shown as "SSID [station_count]" like the official firmware.
-    // In-profile APs are green; tapping opens that AP's station-mode screen so
-    // different APs can carry different modes (All / Pick / Broadcast) in one plan.
+    // Tapping toggles the AP in/out of the profile (green = in). Review / Continue
+    // then opens Target Mode to choose how the selected AP(s) are hit.
     for (int i = 0; i < access_points->size(); i++) {
       AccessPoint ap = access_points->get(i);
       const int total = ap.stations->size();
       const String label = screenName(ap.essid) + " [" + total + "]";
       this->addNodes(m, label.c_str(), ap.selected ? TFTGREEN : TFTLIGHTGREY, 255, [this, i]() {
-        this->buildAttackStationProfile(i);
+        AccessPoint a = access_points->get(i); a.selected = !a.selected;
+        if (!a.selected) {   // leaving the profile: drop its client picks too
+          for (int x = 0; x < a.stations->size(); x++) {
+            Station st = stations->get(a.stations->get(x)); st.selected = false;
+            stations->set(a.stations->get(x), st);
+          }
+        }
+        access_points->set(i, a);
+        this->buildAttackTargets();
       });
     }
   } else if (apScope) {
@@ -5824,66 +5838,107 @@ void MenuFunctions::buildAttackHtmlSelect() {
   this->changeMenu(m, true);
 }
 
-// Per-AP station profile screen: choose how this AP is hit (All Stations /
-// Broadcast / specific stations) and toggle individual clients. Each AP keeps
-// its own mode via the shared selected flags, so one plan can mix modes.
-void MenuFunctions::buildAttackStationProfile(int apIndex) {
-  if (apIndex < 0 || apIndex >= access_points->size()) { this->buildAttackTargets(); return; }
+// "Target Mode": after choosing AP(s) on Choose Targets, decide how every
+// selected AP is hit -- deauth the AP's broadcast (whole BSS), every known
+// client, or a hand-picked subset -- or drop the AP(s) back out of the profile.
+// Operates on the whole selected set at once, matching the official firmware.
+void MenuFunctions::buildAttackTargetMode() {
   Menu* m = &attackStationMenu;
   m->list->clear();
-  AccessPoint ap = access_points->get(apIndex);
-  m->name = screenName(ap.essid) + " [" + ap.stations->size() + "]";
+  m->name = "Target Mode";
   m->parentMenu = &attackTargetsMenu;
 
-  wifi_scan_obj.beginExtmemAlloc();   // one node per station -> keep off DMA heap
+  wifi_scan_obj.beginExtmemAlloc();
   this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() { this->buildAttackTargets(); });
 
-  // Mode shortcuts.
-  this->addNodes(m, "All Stations", TFTGREEN, 255, [this, apIndex]() {
-    AccessPoint a = access_points->get(apIndex); a.selected = true; access_points->set(apIndex, a);
-    for (int x = 0; x < a.stations->size(); x++) {
-      Station st = stations->get(a.stations->get(x)); st.selected = true;
-      stations->set(a.stations->get(x), st);
-    }
-    this->buildAttackStationProfile(apIndex);
+  // Broadcast: target the AP itself (deauth to the broadcast address), clearing
+  // any per-client picks so the attack hits the whole BSS.
+  this->addNodes(m, "Broadcast", TFTRED, DEAUTH_SNIFF, [this]() {
+    this->setSelectedApStations(false);
+    this->buildAttackReview();
   });
-  this->addNodes(m, "Broadcast (no clients)", TFTORANGE, 255, [this, apIndex]() {
-    AccessPoint a = access_points->get(apIndex); a.selected = true; access_points->set(apIndex, a);
-    for (int x = 0; x < a.stations->size(); x++) {
-      Station st = stations->get(a.stations->get(x)); st.selected = false;
-      stations->set(a.stations->get(x), st);
-    }
-    this->buildAttackStationProfile(apIndex);
+  // All Stations: select every known client of every selected AP.
+  this->addNodes(m, "All Stations", TFTYELLOW, DEAUTH_SNIFF, [this]() {
+    this->setSelectedApStations(true);
+    this->buildAttackReview();
   });
-  this->addNodes(m, "Remove from plan", TFTRED, 255, [this, apIndex]() {
-    AccessPoint a = access_points->get(apIndex); a.selected = false; access_points->set(apIndex, a);
-    for (int x = 0; x < a.stations->size(); x++) {
-      Station st = stations->get(a.stations->get(x)); st.selected = false;
-      stations->set(a.stations->get(x), st);
+  // Pick Stations: hand-pick individual clients across the selected AP(s).
+  this->addNodes(m, "Pick Stations", TFTCYAN, KEYBOARD_ICO, [this]() {
+    this->buildAttackPickStations();
+  });
+  // Remove from Profile: drop the selected AP(s) (and their picks) and return to
+  // Choose Targets.
+  this->addNodes(m, "Remove from Profile", TFTYELLOW, CLEAR_ICO, [this]() {
+    for (int i = 0; i < access_points->size(); i++) {
+      AccessPoint a = access_points->get(i);
+      if (!a.selected) continue;
+      for (int x = 0; x < a.stations->size(); x++) {
+        Station st = stations->get(a.stations->get(x)); st.selected = false;
+        stations->set(a.stations->get(x), st);
+      }
+      a.selected = false; access_points->set(i, a);
     }
     this->buildAttackTargets();
   });
 
-  // Individual clients. Tapping one puts this AP in the plan and selects it.
-  const int total = ap.stations->size();
-  if (total == 0) {
-    this->addNodes(m, "(no clients seen - broadcast)", TFTDARKGREY, 255, []() {});
-  } else {
-    for (int x = 0; x < total; x++) {
+  wifi_scan_obj.endExtmemAlloc();
+  this->changeMenu(m, true);
+}
+
+// Select (or clear) every client of every AP currently in the profile. Shared by
+// Target Mode's All Stations / Broadcast and Pick Stations' bulk shortcuts.
+void MenuFunctions::setSelectedApStations(bool selected) {
+  for (int i = 0; i < access_points->size(); i++) {
+    const AccessPoint& a = access_points->get(i);
+    if (!a.selected) continue;
+    for (int x = 0; x < a.stations->size(); x++) {
+      Station st = stations->get(a.stations->get(x)); st.selected = selected;
+      stations->set(a.stations->get(x), st);
+    }
+  }
+}
+
+// "Pick Stations": one toggle row per known client across every selected AP, plus
+// select-all / clear shortcuts. Review / Continue carries the picks to Review
+// Attack; Add Another AP jumps back to Choose Targets to add more APs.
+void MenuFunctions::buildAttackPickStations() {
+  Menu* m = &attackPickMenu;
+  m->list->clear();
+  m->name = "Pick Stations";
+  m->parentMenu = &attackStationMenu;
+
+  wifi_scan_obj.beginExtmemAlloc();   // one node per station -> keep off DMA heap
+  this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() { this->buildAttackTargetMode(); });
+  this->addNodes(m, "Review / Continue", TFTGREEN, ATTACKS, [this]() { this->buildAttackReview(); });
+  this->addNodes(m, "Add Another AP", TFTGREEN, WIFI, [this]() { this->buildAttackTargets(); });
+  this->addNodes(m, "Select AP Stations", TFTGREEN, KEYBOARD_ICO, [this]() {
+    this->setSelectedApStations(true);
+    this->buildAttackPickStations();
+  });
+  this->addNodes(m, "Clear AP Stations", TFTYELLOW, CLEAR_ICO, [this]() {
+    this->setSelectedApStations(false);
+    this->buildAttackPickStations();
+  });
+
+  // Individual clients, listed per AP in the profile. Tapping toggles that client.
+  int shown = 0;
+  for (int i = 0; i < access_points->size(); i++) {
+    AccessPoint ap = access_points->get(i);
+    if (!ap.selected) continue;
+    for (int x = 0; x < ap.stations->size(); x++) {
       const int staIdx = ap.stations->get(x);
       const bool sel = stations->get(staIdx).selected;
       const String label = String(sel ? "[x] " : "[ ] ") +
                            screenMac(macToString(stations->get(staIdx).mac));
-      this->addNodes(m, label.c_str(), sel ? TFTCYAN : TFTLIGHTGREY, 255,
-                     [this, apIndex, staIdx]() {
+      this->addNodes(m, label.c_str(), sel ? TFTCYAN : TFTLIGHTGREY, 255, [this, staIdx]() {
         Station st = stations->get(staIdx); st.selected = !st.selected; stations->set(staIdx, st);
-        AccessPoint a = access_points->get(apIndex); a.selected = true; access_points->set(apIndex, a);
-        this->buildAttackStationProfile(apIndex);
+        this->buildAttackPickStations();
       });
+      shown++;
     }
   }
-
-  this->addNodes(m, "Done", attack_plan.color, ATTACKS, [this]() { this->buildAttackTargets(); });
+  if (shown == 0)
+    this->addNodes(m, "(no clients seen - use Broadcast)", TFTDARKGREY, 255, []() {});
 
   wifi_scan_obj.endExtmemAlloc();
   this->changeMenu(m, true);
