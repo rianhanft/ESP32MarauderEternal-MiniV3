@@ -12402,6 +12402,8 @@ void WiFiScan::drawAttackStatus() {
       case WIFI_ATTACK_RICK_ROLL:        title = "RICK ROLL";        accent = TFT_GREEN;  category = 1; break;
       case WIFI_ATTACK_FUNNY_BEACON:     title = "FUNNY BEACON";     accent = TFT_GREEN;  category = 1; break;
       case WIFI_ATTACK_AP_SPAM:          title = "AP SPAM";          accent = TFT_GREEN;  category = 1; break;
+      case WIFI_ATTACK_CSA:              title = "CHANNEL SWITCH";   accent = TFT_ORANGE; category = 0; break;
+      case WIFI_ATTACK_QUIET:            title = "QUIET TIME";       accent = TFT_RED;    category = 0; break;
       default:                           title = "ATTACK";           accent = TFT_RED;    category = 1; break;
     }
 
@@ -13982,6 +13984,8 @@ void WiFiScan::main(uint32_t currentTime)
         (currentScanMode == WIFI_ATTACK_BAD_MSG_TARGETED) ||
         (currentScanMode == WIFI_ATTACK_SLEEP) ||
         (currentScanMode == WIFI_ATTACK_SLEEP_TARGETED) ||
+        (currentScanMode == WIFI_ATTACK_CSA) ||
+        (currentScanMode == WIFI_ATTACK_QUIET) ||
         (currentScanMode == WIFI_ATTACK_AUTH)) {
       if (static_cast<int32_t>(millis() - this->attack_next_ui) >= 0) {
         this->attack_next_ui = millis() + 700;
