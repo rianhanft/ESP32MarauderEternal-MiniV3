@@ -5508,7 +5508,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
           return;
         }
         this->confirmAction("Authorize Drone Spoof", &nyanAttackMenu, []() {
-          DroneRemoteIDSpoofer::run();
+          DroneRemoteIDSpoofer::run();   // captured replay: 60s auto-stop
         });
       });
       this->addNodes(menu, "Drone Spoof (SD)", TFTRED, ATTACKS, [this]() {
@@ -5522,7 +5522,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
           return;
         }
         this->confirmAction("Authorize Drone Spoof", &nyanAttackMenu, []() {
-          DroneRemoteIDSpoofer::run();
+          DroneRemoteIDSpoofer::run(false);   // SD spoof: no auto-stop (Center to stop)
         });
       });
       break;

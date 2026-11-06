@@ -3,8 +3,9 @@
  *
  * Transport/message handling is adapted from nyanBOX (MIT) and
  * opendroneid-core-c (Apache-2.0). This version only replays a drone explicitly
- * selected from the most recent passive Remote ID scan, uses a moderate update
- * interval, and stops automatically after 60 seconds.
+ * selected from the most recent passive Remote ID scan (60 s auto-stop) or
+ * built from an SD file (runs until the user stops it), and uses a moderate
+ * update interval.
  * SPDX-License-Identifier: MIT AND Apache-2.0
  */
 
@@ -195,7 +196,7 @@ bool sendWifiBeacon(
 void drawStatus(uint32_t started, uint32_t blePackets, uint32_t wifiPackets,
                 uint8_t wifiChannel, uint8_t messageCount, bool bleOkay,
                 bool wifiOkay, bool exactBleAddress, bool exactWifiAddress,
-                uint8_t gpsState) {
+                uint8_t gpsState, bool autoStop) {
   const uint32_t elapsed = millis() - started;
   const uint32_t remaining = elapsed >= MAX_RUNTIME_MS ? 0 :
       (MAX_RUNTIME_MS - elapsed + 999) / 1000;
@@ -245,7 +246,10 @@ void drawStatus(uint32_t started, uint32_t blePackets, uint32_t wifiPackets,
   display_obj.tft.print(selectedTarget.address);
   display_obj.tft.resetViewport();
   display_obj.tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-  display_obj.tft.drawString(String("Auto stop: ") + remaining + "s", 4, 106, 1);
+  if (autoStop)
+    display_obj.tft.drawString(String("Auto stop: ") + remaining + "s", 4, 106, 1);
+  else
+    display_obj.tft.drawString("Running (no auto-stop)", 4, 106, 1);
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
   display_obj.tft.print(F("Center: stop now"));
@@ -273,7 +277,7 @@ bool selectTarget(const DroneRemoteID::CapturedDrone& target) {
   return true;
 }
 
-void run() {
+void run(bool autoStop) {
   releaseButton(c_btn);
   if (!targetSelected || selectedTarget.messageMask == 0) {
     drawError("No captured target selected. Run Drone Remote ID first.");
@@ -363,9 +367,10 @@ void run() {
     uint8_t counter = 0;
     uint16_t sequence = 0;
     GpsSpoofState gpsState = applyLiveGps();
-    Serial.printf("[Drone Spoof] replaying captured RID %s (%u message types); maximum 60 seconds\n",
-                  selectedTarget.id, messageCount);
-    while (millis() - started < MAX_RUNTIME_MS) {
+    Serial.printf("[Drone Spoof] replaying captured RID %s (%u message types); %s\n",
+                  selectedTarget.id, messageCount,
+                  autoStop ? "maximum 60 seconds" : "no auto-stop (Center to stop)");
+    while (!autoStop || millis() - started < MAX_RUNTIME_MS) {
       #ifdef HAS_GPS
         gps_obj.main();   // keep our fix fresh during this blocking loop
       #endif
@@ -396,7 +401,8 @@ void run() {
       }
       if (static_cast<int32_t>(now - nextDraw) >= 0) {
         drawStatus(started, blePackets, wifiPackets, wifiChannel, messageCount,
-                   bleOkay, wifiOkay, exactBleAddress, exactWifiAddress, gpsState);
+                   bleOkay, wifiOkay, exactBleAddress, exactWifiAddress, gpsState,
+                   autoStop);
         nextDraw = now + 500;
       }
       delay(5);
@@ -470,7 +476,7 @@ void run() {
 
 namespace DroneRemoteIDSpoofer {
 bool selectTarget(const DroneRemoteID::CapturedDrone&) { return false; }
-void run() {}
+void run(bool) {}
 }
 
 #endif
