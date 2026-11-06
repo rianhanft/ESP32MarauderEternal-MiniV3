@@ -13087,9 +13087,11 @@ void WiFiScan::setFoxHuntTarget(const uint8_t mac[6], const String& name, int8_t
   this->fox_hunt_target.last_seen_ms = millis();
   this->fox_hunt_target.advertised_address = advertised_address;
   this->fox_hunt_target.advertised_address.toUpperCase();
-  // Fresh target -> forget the previous hunt's closest-approach and trend.
+  // Fresh target -> forget the previous hunt's closest-approach and trend, and
+  // wipe the selection screen on the first gauge frame.
   this->fox_peak_rssi = -128;
   this->fox_trend_ref = -128;
+  this->fox_needs_clear = true;
   if (marauder::foxHuntShouldUpdateChannel(bluetooth, channel))
     this->set_channel = channel;
 }
@@ -13187,8 +13189,6 @@ void WiFiScan::runFoxHunt(uint32_t currentTime) {
     else
       return;
 
-    display_obj.tft.fillRect(0, (TFT_HEIGHT / 3), TFT_WIDTH, TFT_HEIGHT / 3, TFT_BLACK);
-
     #ifdef HAS_BT
       if ((currentScanMode == BT_SCAN_FOX_HUNT) && this->fox_hunt_target.active) {
         this->drawFoxHuntMeter();
@@ -13238,57 +13238,108 @@ void WiFiScan::drawFoxHuntMeter() {
       this->fox_trend_ref = (int16_t)((this->fox_trend_ref * 3 + rssi) / 4);
     }
 
-    // Target name (cyan).
-    display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
-    #ifdef HAS_MINI_SCREEN
-      display_obj.tft.setTextSize(1);
-      display_obj.showCenterText(screenIdentifier(this->fox_hunt_target.name).c_str(), (H / 4), true);
-    #else
-      display_obj.tft.setTextSize(2);
-      display_obj.showCenterText(screenIdentifier(this->fox_hunt_target.name).c_str(), (H / 4), false, 2);
-    #endif
+    // Map an RSSI to 0..1 over a useful walking range (-90 far .. -30 close).
+    auto fracOf = [](int rr) -> float {
+      float f = (rr + 90) / 60.0f;
+      return f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
+    };
+    const float frac = fracOf(rssi);
 
-    // Big live RSSI, or SEARCHING when the target has gone quiet.
+    // Gauge geometry (dial centred; 270-deg arc open at the bottom).
+    #ifdef HAS_MINI_SCREEN
+      const int cx = W / 2, cy = 62, r = 36, ir = 27;
+      const int nameY = 6, nameClrH = 12, numFont = 2, nameFont = 1, trendY = 102;
+    #else
+      const int cx = W / 2, cy = 140, r = 66, ir = 52;
+      const int nameY = 34, nameClrH = 18, numFont = 4, nameFont = 2, trendY = 212;
+    #endif
+    const int startA = 45, endA = 315, sweep = 270;
+    const uint16_t trackCol = 0x2124;  // dim slate track
+
+    if (this->fox_needs_clear) {       // wipe the selection screen once
+      display_obj.tft.fillScreen(TFT_BLACK);
+      this->fox_needs_clear = false;
+    }
+
+    // Angle (TFT convention: 0 deg = 6 o'clock, clockwise) -> screen point.
+    auto pt = [&](float deg, float rad, int &x, int &y) {
+      const float a = deg * 0.0174532925f;
+      x = (int)(cx - rad * sinf(a) + 0.5f);
+      y = (int)(cy + rad * cosf(a) + 0.5f);
+    };
+
+    // Ring: coloured fill arc up to the current level, dim track for the rest.
+    const int fillEnd = startA + (int)(frac * sweep + 0.5f);
+    const uint16_t fillCol = rssiToColorScaled(rssi);
+    if (!stale && fillEnd > startA + 1)
+      display_obj.tft.drawSmoothArc(cx, cy, r, ir, startA, fillEnd, fillCol, TFT_BLACK);
+    const int trackStart = (!stale && fillEnd > startA + 1) ? fillEnd : startA;
+    if (trackStart < endA - 1)
+      display_obj.tft.drawSmoothArc(cx, cy, r, ir, trackStart, endA, trackCol, TFT_BLACK);
+
+    // Rotating scan sweep while the target is lost (stays within the arc band).
+    if (stale) {
+      const float sdeg = startA + (float)((millis() / 6) % (unsigned int)sweep);
+      int ox, oy, ix, iy; pt(sdeg, r, ox, oy); pt(sdeg, ir, ix, iy);
+      display_obj.tft.drawWedgeLine(ix, iy, ox, oy, 1.0f, 1.6f, 0x4208, TFT_BLACK);
+    }
+
+    // White peak-hold notch = closest approach so far.
+    if (this->fox_peak_rssi > -128) {
+      const float pdeg = startA + fracOf(this->fox_peak_rssi) * sweep;
+      int ox, oy, ix, iy; pt(pdeg, r + 3, ox, oy); pt(pdeg, ir - 3, ix, iy);
+      display_obj.tft.drawWedgeLine(ox, oy, ix, iy, 2.0f, 2.0f, TFT_WHITE, TFT_BLACK);
+    }
+
+    // Centre: big live RSSI, or "--" while searching.
+    display_obj.tft.setTextDatum(MC_DATUM);
+    #ifdef HAS_MINI_SCREEN
+      display_obj.tft.fillRect(cx - 28, cy - 14, 56, 28, TFT_BLACK);
+    #else
+      display_obj.tft.fillRect(cx - 46, cy - 24, 92, 48, TFT_BLACK);
+    #endif
     if (stale) {
       display_obj.tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-      #ifdef HAS_MINI_SCREEN
-        display_obj.showCenterText("...", (H / 3), true);
-      #else
-        display_obj.showCenterText("SEARCHING", (H / 3), false, 2);
-      #endif
+      display_obj.tft.drawString("--", cx, cy, numFont);
     } else {
-      display_obj.tft.setTextColor(rssiToColorScaled(rssi), TFT_BLACK);
-      #ifdef HAS_MINI_SCREEN
-        display_obj.showCenterText(String(rssi).c_str(), (H / 3), false, 2);
-      #else
-        display_obj.showCenterText(String(rssi).c_str(), (H / 3), false, 3);
-      #endif
+      display_obj.tft.setTextColor(fillCol, TFT_BLACK);
+      display_obj.tft.drawString(String(rssi), cx, cy - (numFont >= 4 ? 7 : 4), numFont);
+      display_obj.tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+      display_obj.tft.drawString("dBm", cx, cy + (numFont >= 4 ? 16 : 11), 1);
     }
 
-    // Warmer / colder / hold cue.
-    const char* tword = stale ? "" : (trend > 0 ? "WARMER" : (trend < 0 ? "COLDER" : "HOLD"));
-    display_obj.tft.setTextColor(trend > 0 ? TFT_GREEN : (trend < 0 ? TFT_RED : TFT_LIGHTGREY), TFT_BLACK);
-    display_obj.showCenterText(tword, (H / 2), true);
+    // Target name (top).
+    display_obj.tft.fillRect(0, nameY - 2, W, nameClrH, TFT_BLACK);
+    display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    display_obj.tft.drawString(screenIdentifier(this->fox_hunt_target.name), cx, nameY + 7, nameFont);
 
-    // Signal bar + peak-hold marker.
-    const int barY = (H / 4) * 3;
-    display_obj.tft.fillRect(0, barY - 4, W, 30, TFT_BLACK);  // clear bar + marker band
-    if (!stale)
-      display_obj.tft.fillRect(0, barY, rssiToBarWidth(rssi), 20, rssiToColorScaled(rssi));
-    if (this->fox_peak_rssi > -128) {
-      int px = rssiToBarWidth(this->fox_peak_rssi);
-      if (px > W - 3) px = W - 3;
-      display_obj.tft.fillRect(px, barY - 3, 3, 26, TFT_WHITE);  // closest-approach marker
+    // Warmer / colder cue (triangle + word) below the dial.
+    display_obj.tft.fillRect(0, trendY - 2, W, 24, TFT_BLACK);
+    if (stale) {
+      display_obj.tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+      display_obj.tft.drawString("SEARCHING", cx, trendY + 9, nameFont);
+    } else {
+      const uint16_t tc = trend > 0 ? TFT_GREEN : (trend < 0 ? TFT_RED : TFT_LIGHTGREY);
+      if (trend > 0)
+        display_obj.tft.fillTriangle(cx - 7, trendY + 6, cx + 7, trendY + 6, cx, trendY - 2, tc);
+      else if (trend < 0)
+        display_obj.tft.fillTriangle(cx - 7, trendY - 2, cx + 7, trendY - 2, cx, trendY + 6, tc);
+      display_obj.tft.setTextColor(tc, TFT_BLACK);
+      display_obj.tft.drawString(trend > 0 ? "WARMER" : (trend < 0 ? "COLDER" : "HOLD"),
+                                 cx, trendY + 16, nameFont);
     }
 
-    // "BEST -xx" closest-approach readout (room only on the full screen).
+    // BEST closest-approach readout (room only on the full screen).
     #ifndef HAS_MINI_SCREEN
-      display_obj.tft.fillRect(0, barY + 28, W, 14, TFT_BLACK);
+      const int bestY = trendY + 38;
+      display_obj.tft.fillRect(0, bestY - 2, W, 14, TFT_BLACK);
       if (this->fox_peak_rssi > -128) {
         display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-        display_obj.showCenterText((String("BEST ") + (int)this->fox_peak_rssi).c_str(), barY + 28, true);
+        display_obj.tft.drawString((String("BEST ") + (int)this->fox_peak_rssi), cx, bestY + 5, 1);
       }
     #endif
+
+    display_obj.tft.setTextDatum(TL_DATUM);
   #endif
 }
 

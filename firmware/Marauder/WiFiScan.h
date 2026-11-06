@@ -944,6 +944,7 @@ class WiFiScan
     // trend. Both reset when a new target is chosen (setFoxHuntTarget).
     int8_t fox_peak_rssi = -128;
     int16_t fox_trend_ref = -128;
+    bool fox_needs_clear = false;   // wipe the prior screen on the first gauge frame
     void drawFoxHuntMeter();
 
     volatile bool bt_cb_busy = false;
