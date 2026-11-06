@@ -102,8 +102,20 @@ GpsSpoofState applyLiveGps() {
   }
   if (!(selectedTarget.messageMask & (1 << ODID_MSG_LOCATION)))
     return GPS_NO_LOC_MSG;
-  putI32Le(selectedTarget.messages[ODID_MSG_LOCATION] + 5, latE7);
-  putI32Le(selectedTarget.messages[ODID_MSG_LOCATION] + 9, lonE7);
+  uint8_t* loc = selectedTarget.messages[ODID_MSG_LOCATION];
+  putI32Le(loc + 5, latE7);
+  putI32Le(loc + 9, lonE7);
+  // The broadcast position is now our own live GPS fix, so replace the encoder's
+  // "accuracy unknown" (byte 19 = 0) with a tight value and report a real
+  // geodetic altitude. Otherwise a detector plots the exact coordinate with a
+  // huge uncertainty, which reads as an inaccurate location on the Remote ID
+  // scan. ODID altitude: raw = (metres + 1000) / 0.5; byte 19 packs vertical
+  // accuracy in the high nibble and horizontal in the low (11 = <3 m, 3 = <25 m).
+  float altRawF = (gps_obj.getAlt() + 1000.0f) * 2.0f + 0.5f;
+  if (altRawF < 0.0f) altRawF = 0.0f;
+  if (altRawF > 65535.0f) altRawF = 65535.0f;
+  putLe16(loc + 15, static_cast<uint16_t>(altRawF));   // geodetic altitude
+  loc[19] = (3 << 4) | 11;                             // vert <25 m, horiz <3 m
   return GPS_TRACKING;
 #else
   return GPS_UNSUPPORTED;
