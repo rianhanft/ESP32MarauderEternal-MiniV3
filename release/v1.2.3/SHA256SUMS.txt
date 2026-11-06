@@ -1,0 +1,2 @@
+3f8a4f0ae10c8e96581f702ed9f84592c75b8835bcd8f4e95d6060f1804d58a6  marauder_eternal_v1.2.3_mini_v3.bin
+19b7123b4d01c8b641d36bb20c42d3fd9dd9aff3704b67b14f987862ff381ebf  marauder_eternal_v1.2.3_v8.bin
