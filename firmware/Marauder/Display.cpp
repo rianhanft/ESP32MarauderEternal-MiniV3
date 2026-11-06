@@ -332,22 +332,44 @@ inline bool catLogoBit(int16_t x, int16_t y) {
   return (packed >> (7 - (x & 7))) & 0x01;
 }
 void drawCatEmblem(TFT_eSPI& tft, int16_t dx, int16_t dy, int16_t dw, int16_t dh,
-                   uint16_t color) {
+                   uint16_t color, uint16_t bg = TFT_BLACK) {
   if (dw <= 0 || dh <= 0) return;
+  // Anti-aliased scaling: each destination pixel is covered by a 4x4 grid of
+  // sub-samples of the 1-bit source, and the coverage fraction becomes an alpha
+  // that blends the emblem colour over the background -- so edges are smooth
+  // instead of the hard stair-steps of the old nearest-neighbour scaling.
+  // Fully-covered pixels still batch into a solid drawFastHLine run (fast);
+  // only partial edge pixels pay for a per-pixel blend; empty pixels are skipped.
+  constexpr uint8_t SS = 4;                 // sub-samples per axis
+  constexpr int32_t SAMPLES = SS * SS;
   for (int16_t y = 0; y < dh; ++y) {
-    const int16_t sy = static_cast<int16_t>(
-        (static_cast<int32_t>(y) * CAT_LOGO_HEIGHT) / dh);
     int16_t run = -1;
-    for (int16_t x = 0; x <= dw; ++x) {
-      const bool on = x < dw &&
-          catLogoBit(static_cast<int16_t>(
-                         (static_cast<int32_t>(x) * CAT_LOGO_WIDTH) / dw), sy);
-      if (on && run < 0) run = x;
-      if (!on && run >= 0) {
+    for (int16_t x = 0; x < dw; ++x) {
+      int32_t hits = 0;
+      for (uint8_t jy = 0; jy < SS; ++jy) {
+        const int16_t sy = static_cast<int16_t>(
+            ((static_cast<int32_t>(y) * SS + jy) * CAT_LOGO_HEIGHT) /
+            (static_cast<int32_t>(dh) * SS));
+        for (uint8_t jx = 0; jx < SS; ++jx) {
+          const int16_t sx = static_cast<int16_t>(
+              ((static_cast<int32_t>(x) * SS + jx) * CAT_LOGO_WIDTH) /
+              (static_cast<int32_t>(dw) * SS));
+          hits += catLogoBit(sx, sy);
+        }
+      }
+      if (hits == SAMPLES) {                 // fully inside -> extend solid run
+        if (run < 0) run = x;
+        continue;
+      }
+      if (run >= 0) {                        // close the current solid run
         tft.drawFastHLine(dx + run, dy + y, x - run, color);
         run = -1;
       }
+      if (hits == 0) continue;               // fully outside -> keep background
+      const uint8_t alpha = static_cast<uint8_t>((hits * 255) / SAMPLES);
+      tft.drawPixel(dx + x, dy + y, tft.alphaBlend(alpha, color, bg));
     }
+    if (run >= 0) tft.drawFastHLine(dx + run, dy + y, dw - run, color);
   }
 }
 }  // namespace
