@@ -1,58 +1,95 @@
-# MarauderBox Remote (`marauder_remote.py`)
+# MarauderBox Remote (`Remote.py`)
 
-Drive your MarauderBox from your **phone's browser** over WiFi. A computer with
-the Marauder plugged in via USB runs this script; it bridges the Marauder's
-serial command line to a small web page you open on your phone.
+Drive your MarauderBox from your **phone's browser**. A computer with the
+Marauder plugged in via USB runs `Remote.py`; it bridges the Marauder's serial
+command line to a web page you open on your phone — a tappable Marauder-style
+menu, a command box, and a live serial console.
 
 ```
-[ Marauder ] --USB serial--> [ computer running this script ] <--WiFi--> [ phone browser ]
+[ Marauder ] --USB serial--> [ computer runs Remote.py ] <--WiFi/internet--> [ phone browser ]
 ```
-
-You get a Marauder-style menu you navigate by tapping, a free-text command box,
-and a live, color-coded serial console.
 
 > **Authorized use only.** This is a remote control for a device you own.
+
+---
+
+## Control from your phone, anywhere (`--tunnel`)
+
+This is the easiest way — your phone does **not** need to be on the same WiFi
+(works on cellular too). Assuming `Remote.py` is in your **Downloads** folder:
+
+```
+cd ~/Downloads
+python3 Remote.py --tunnel
+```
+
+That prints a public link and a QR code:
+
+```
+  OPEN THIS ON YOUR PHONE (any network, even cellular):
+      https://something-random.trycloudflare.com/?t=XXXXXX
+
+  ^ or scan the QR above.
+```
+
+**Scan the QR** (or open the link) on your phone and you're in. Press **Ctrl-C**
+in the terminal to stop — the link dies the moment you quit.
+
+**First time?** You need two things in place:
+
+1. **pyserial** (one-time):
+   ```
+   pip3 install pyserial
+   ```
+2. **cloudflared** — the tunnel helper. Easiest: install it once with Homebrew:
+   ```
+   brew install cloudflared
+   ```
+   No Homebrew? Download the binary straight into Downloads next to `Remote.py`:
+   ```
+   cd ~/Downloads
+   A=$(uname -m | sed 's/x86_64/amd64/;s/arm64/arm64/')
+   curl -L -o cloudflared.tgz \
+     https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-$A.tgz
+   tar -xzf cloudflared.tgz && chmod +x cloudflared && rm cloudflared.tgz
+   ```
+   `Remote.py` auto-finds `cloudflared` on your PATH **or** sitting next to it in
+   Downloads — nothing else to configure.
+
+> The tunnel URL is internet-reachable, so a secret token is auto-added to it.
+> Keep the link private; it stops working as soon as you Ctrl-C.
+
+---
+
+## Control from your phone on the same WiFi (no internet)
+
+If your phone and computer are on the **same WiFi**, you don't need the tunnel:
+
+```
+cd ~/Downloads
+python3 Remote.py
+```
+
+It prints a local address — open it on your phone:
+
+```
+  MarauderBox Remote ready
+  Serial : /dev/cu.usbserial-XXXX @ 115200    HTTP port: 8080
+  Open on your phone (same WiFi):
+      http://192.168.1.42:8080
+```
+
+(Only needs **pyserial** — `pip3 install pyserial`. No cloudflared required.)
 
 ---
 
 ## Requirements
 
 - **Python 3.8+**
-- **pyserial** — `pip install pyserial`
+- **pyserial** — `pip3 install pyserial`
 - A Marauder flashed with firmware that has the **serial CLI** (this fork does).
-- Optional:
-  - **qrcode** (`pip install qrcode`) — prints a scannable QR for the URL.
-  - **cloudflared** — only needed for the public `--tunnel` option (see below).
-
----
-
-## Quick start (same WiFi)
-
-1. Plug the Marauder into your computer with a USB **data** cable.
-2. Install the dependency:
-   ```
-   pip install pyserial
-   ```
-3. Run it (the serial port is auto-detected):
-   ```
-   python3 marauder_remote.py
-   ```
-4. It prints something like:
-   ```
-   ================================================================
-     MarauderBox Remote ready
-     Serial : /dev/ttyUSB0 @ 115200    HTTP port: 8080
-     Open on your phone (same WiFi):
-         http://192.168.1.42:8080
-   ================================================================
-   ```
-5. On your **phone** (connected to the **same WiFi**), open that
-   `http://<computer-ip>:8080` URL.
-6. Tap through the menu, type commands, watch the console. Press **Ctrl-C** in
-   the terminal to stop.
-
-If auto-detect picks the wrong port, or nothing is found, see
-[Finding the serial port](#finding-the-serial-port).
+- For `--tunnel` only: **cloudflared** (see above).
+- Optional: **qrcode** (`pip3 install qrcode`) to print a scannable QR in the terminal.
 
 ---
 
@@ -60,76 +97,48 @@ If auto-detect picks the wrong port, or nothing is found, see
 
 | Flag | Default | What it does |
 |------|---------|--------------|
-| `--port PORT` | auto-detect | Serial port (e.g. `COM5`, `/dev/ttyUSB0`, `/dev/cu.usbmodem1101`). |
+| `--tunnel` | off | Public https link via cloudflared — phone reachable from anywhere. |
+| `--port PORT` | auto-detect | Serial port (e.g. `/dev/cu.usbserial-XXXX`, `/dev/ttyUSB0`, `COM5`). |
 | `--baud N` | `115200` | Serial baud rate. |
 | `--http-port N` | `8080` | Web server port. |
 | `--host ADDR` | `0.0.0.0` | Bind address (all interfaces by default). |
 | `--token SECRET` | *(none)* | Require `?t=SECRET` on the URL — a simple guard on a shared LAN. |
-| `--tunnel` | off | Expose a **public https link** via cloudflared (phone does **not** need the same WiFi). |
-| `--cloudflared PATH` | auto | Path to the `cloudflared` binary (otherwise found on `PATH` or next to this script). |
-| `--assert-dtr` | off | Hold DTR/RTS asserted on open (legacy). Only use it if a board stays silent — see note below. |
+| `--cloudflared PATH` | auto | Path to the `cloudflared` binary (otherwise PATH or next to `Remote.py`). |
+| `--assert-dtr` | off | Hold DTR/RTS asserted on open (legacy) — only if a board stays silent. |
 | `--list-ports` | — | List serial ports and exit. |
 
-### Examples
+### More examples
 ```
-python3 marauder_remote.py                              # auto port, serve on :8080
-python3 marauder_remote.py --port COM5                  # Windows, explicit port
-python3 marauder_remote.py --port /dev/ttyUSB0 --baud 115200 --http-port 8080
-python3 marauder_remote.py --token mysecret             # require ?t=mysecret on the URL
-python3 marauder_remote.py --tunnel                     # public link, reachable anywhere
+python3 Remote.py --port COM5                  # Windows, explicit port
+python3 Remote.py --port /dev/ttyUSB0 --baud 115200
+python3 Remote.py --token mysecret             # require ?t=mysecret on the URL
 ```
 
 ---
 
 ## Finding the serial port
 
-List what's connected and exit:
+Usually auto-detected. To see what's connected:
 ```
-python3 marauder_remote.py --list-ports
+python3 Remote.py --list-ports
 ```
 Typical names:
+- **macOS:** `/dev/cu.usbserial-XXXX` or `/dev/cu.usbmodemXXXX` (the `cu.*` form is preferred automatically)
 - **Linux:** `/dev/ttyUSB0` or `/dev/ttyACM0`
-- **macOS:** `/dev/cu.usbserial-XXXX` or `/dev/cu.usbmodemXXXX` (the script prefers the `cu.*` form automatically)
 - **Windows:** `COM3`, `COM5`, …
 
 Then pass it with `--port`.
 
 ---
 
-## Remote over the internet (`--tunnel`)
-
-`--tunnel` opens a public HTTPS link through Cloudflare, so your phone can reach
-the Marauder from **any** network (even cellular) — no port forwarding.
-
-```
-python3 marauder_remote.py --tunnel
-```
-
-- It prints a `https://<random>.trycloudflare.com/...` link (and a QR if `qrcode`
-  is installed).
-- A **token is auto-generated** and baked into the link, because a public URL is
-  internet-reachable — keep the link private.
-- The link **stops working the moment you quit the script** (Ctrl-C).
-
-**cloudflared** must be available. Either:
-- install it (`brew install cloudflared`, your package manager, or the
-  [Cloudflare releases](https://github.com/cloudflare/cloudflared/releases)),
-- drop the `cloudflared` binary next to this script, or
-- point to it with `--cloudflared /path/to/cloudflared`.
-
-If it's missing, the script prints exactly how to fetch it for your OS.
-
----
-
 ## Native-USB boards (T-Dongle C5) — the DTR note
 
-By default the script leaves the DTR/RTS lines **low** on open, so native
-USB-Serial-JTAG boards (like the **LilyGo T-Dongle C5**) don't get yanked into
-the bootloader / reset when you connect. This is what you want almost always.
-
-Only if a board connects but **stays completely silent** should you try:
+By default `Remote.py` leaves the DTR/RTS lines **low** on open, so native
+USB-Serial-JTAG boards (the **LilyGo T-Dongle C5**) don't get reset into the
+bootloader when you connect. That's what you want almost always. Only if a board
+connects but stays **completely silent**, try:
 ```
-python3 marauder_remote.py --assert-dtr
+python3 Remote.py --assert-dtr
 ```
 
 ---
@@ -139,22 +148,21 @@ python3 marauder_remote.py --assert-dtr
 - ✅ Everything on the Marauder's **serial command line**: WiFi / BLE / GPS
   scans, the attack commands, list management, Evil Portal (with AP + HTML
   pickers), wardrive, etc.
-- ❌ **Touch-only screens** have no serial command and can't be triggered
-  remotely: Device Scout, Camera Detect, the Drone Remote ID detail views, Cast.
+- ❌ **Touch-only screens** have no serial command and can't be driven remotely:
+  Device Scout, Camera Detect, the Drone Remote ID detail views, Cast.
 
 ---
 
 ## Troubleshooting
 
-- **"No serial port found."** Plug the Marauder in with a data cable, close any
-  other serial monitor using the port, then pass `--port` (see `--list-ports`).
-- **Phone can't load the page.** Confirm the phone is on the **same WiFi**, and
-  that your computer's **firewall** allows inbound connections on the HTTP port
-  (8080). Corporate/guest networks often block device-to-device traffic — use
-  `--tunnel` instead.
-- **Connected but the console is empty / no response.** Check the baud
-  (`--baud 115200`). On a native-USB board that stays silent, try `--assert-dtr`.
-- **`--tunnel` says cloudflared not found.** Install it or pass `--cloudflared`
-  (see above).
-- **macOS "port busy".** Another app (Arduino IDE serial monitor, screen) is
-  holding the port — close it.
+- **"No serial port found."** Plug the Marauder in with a **data** cable, close
+  any other serial monitor using the port, then pass `--port` (see `--list-ports`).
+- **`--tunnel` says cloudflared not found.** Install it (`brew install cloudflared`)
+  or drop the `cloudflared` binary in Downloads next to `Remote.py`.
+- **Phone can't load the local (same-WiFi) page.** Confirm the phone is on the
+  **same WiFi**, and that your computer's **firewall** allows inbound on port 8080.
+  Guest/corporate WiFi often blocks device-to-device — use `--tunnel` instead.
+- **Connected but the console is empty.** Check `--baud 115200`. On a native-USB
+  board that stays silent, try `--assert-dtr`.
+- **macOS "port busy".** Another app (Arduino serial monitor, `screen`) holds the
+  port — close it.

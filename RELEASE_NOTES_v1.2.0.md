@@ -57,7 +57,7 @@ Marauder:
 - Fresh scan lists each run (fixes slow/stuck/dead scans); channel-sweep reset so
   dense 5 GHz channels don't stall.
 
-## Companion tool — Marauder Remote (`tools/marauder_remote.py`)
+## Companion tool — Marauder Remote (`tools/Remote.py`)
 Control the Marauder headless from a phone or laptop over USB/serial:
 - Device-style menu mirroring the full CLI surface; SSID/AP pickers.
 - Evil Portal flow with AP + **HTML file** pickers.

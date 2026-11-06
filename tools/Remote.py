@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-marauder_remote.py -- drive your MarauderBox from your phone over WiFi.
+Remote.py -- drive your MarauderBox from your phone over WiFi.
 
 How it works:
   [ Marauder ] --USB serial--> [ this computer runs this script ] <--WiFi--> [ phone browser ]
@@ -12,10 +12,10 @@ menu you navigate by tapping, a free-text command box, and a live serial console
 Requires: Python 3.8+ and pyserial  ->  pip install pyserial
 
 Examples:
-  python3 marauder_remote.py                 # auto-detect port, serve on :8080
-  python3 marauder_remote.py --port COM5
-  python3 marauder_remote.py --port /dev/ttyUSB0 --baud 115200 --http-port 8080
-  python3 marauder_remote.py --token mysecret # require ?t=mysecret (simple LAN guard)
+  python3 Remote.py                 # auto-detect port, serve on :8080
+  python3 Remote.py --port COM5
+  python3 Remote.py --port /dev/ttyUSB0 --baud 115200 --http-port 8080
+  python3 Remote.py --token mysecret # require ?t=mysecret (simple LAN guard)
 
 Note: this drives the Marauder's SERIAL command-line, so it covers the WiFi /
 BLE / GPS / attack / list commands. The touch-only NyanBox screens (Device
@@ -984,7 +984,7 @@ TUNNEL_RE = re.compile(r"https://[a-z0-9][a-z0-9-]*\.trycloudflare\.com")
 def find_cloudflared(explicit=None):
     """Locate the cloudflared binary: an explicit --cloudflared path, then PATH,
     then next to the script or in the current folder (so you can just drop the
-    downloaded binary beside marauder_remote.py -- no PATH/install needed)."""
+    downloaded binary beside Remote.py -- no PATH/install needed)."""
     import os
     if explicit:
         return explicit if os.path.isfile(explicit) else shutil.which(explicit)
