@@ -939,6 +939,12 @@ class WiFiScan
     };
 
     FoxHuntTarget fox_hunt_target;
+    // Fox-hunt proximity extras: peak-hold (strongest RSSI seen for the current
+    // target, i.e. closest approach) and a slow reference for the warmer/colder
+    // trend. Both reset when a new target is chosen (setFoxHuntTarget).
+    int8_t fox_peak_rssi = -128;
+    int16_t fox_trend_ref = -128;
+    void drawFoxHuntMeter();
 
     volatile bool bt_cb_busy = false;
     volatile bool bt_pending_clear = false;

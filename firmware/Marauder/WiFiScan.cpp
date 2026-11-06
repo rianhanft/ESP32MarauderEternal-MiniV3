@@ -13087,6 +13087,9 @@ void WiFiScan::setFoxHuntTarget(const uint8_t mac[6], const String& name, int8_t
   this->fox_hunt_target.last_seen_ms = millis();
   this->fox_hunt_target.advertised_address = advertised_address;
   this->fox_hunt_target.advertised_address.toUpperCase();
+  // Fresh target -> forget the previous hunt's closest-approach and trend.
+  this->fox_peak_rssi = -128;
+  this->fox_trend_ref = -128;
   if (marauder::foxHuntShouldUpdateChannel(bluetooth, channel))
     this->set_channel = channel;
 }
@@ -13188,38 +13191,7 @@ void WiFiScan::runFoxHunt(uint32_t currentTime) {
 
     #ifdef HAS_BT
       if ((currentScanMode == BT_SCAN_FOX_HUNT) && this->fox_hunt_target.active) {
-            int targ_rssi = this->fox_hunt_target.rssi;
-
-            #ifdef HAS_MINI_SCREEN
-              display_obj.tft.setTextSize(1);
-            #else
-              display_obj.tft.setTextSize(2);
-            #endif
-
-            display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
-
-            #ifdef HAS_MINI_SCREEN
-              display_obj.showCenterText(screenIdentifier(this->fox_hunt_target.name).c_str(), (TFT_HEIGHT / 4), true);
-            #else
-              display_obj.showCenterText(screenIdentifier(this->fox_hunt_target.name).c_str(), (TFT_HEIGHT / 4), false, 2);
-            #endif
-
-            #ifdef HAS_MINI_SCREEN
-              display_obj.tft.setTextSize(2);
-            #else
-              display_obj.tft.setTextSize(3);
-            #endif
-
-            display_obj.tft.setTextColor(rssiToColorScaled(targ_rssi), TFT_BLACK);
-
-            #ifdef HAS_MINI_SCREEN
-              display_obj.showCenterText(String(targ_rssi).c_str(), (TFT_HEIGHT / 3), false, 2);
-            #else
-              display_obj.showCenterText(String(targ_rssi).c_str(), (TFT_HEIGHT / 3), false, 3);
-            #endif
-
-            display_obj.tft.fillRect(0, (TFT_HEIGHT / 4) * 3, rssiToBarWidth(targ_rssi), 20, rssiToColorScaled(targ_rssi));
-            display_obj.tft.fillRect(rssiToBarWidth(targ_rssi), (TFT_HEIGHT / 4) * 3, TFT_WIDTH, 20, TFT_BLACK);
+        this->drawFoxHuntMeter();
       }
     #endif
 
@@ -13236,39 +13208,87 @@ void WiFiScan::runFoxHunt(uint32_t currentTime) {
           else
             this->changeChannel(this->fox_hunt_target.channel);
 
-          int targ_rssi = this->fox_hunt_target.rssi;
-
-          #ifdef HAS_MINI_SCREEN
-            display_obj.tft.setTextSize(1);
-          #else
-            display_obj.tft.setTextSize(2);
-          #endif
-
-          display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
-
-          #ifdef HAS_MINI_SCREEN
-            display_obj.showCenterText(screenIdentifier(this->fox_hunt_target.name).c_str(), (TFT_HEIGHT / 4), true);
-          #else
-            display_obj.showCenterText(screenIdentifier(this->fox_hunt_target.name).c_str(), (TFT_HEIGHT / 4), false, 2);
-          #endif
-
-          #ifdef HAS_MINI_SCREEN
-            display_obj.tft.setTextSize(2);
-          #else
-            display_obj.tft.setTextSize(3);
-          #endif
-
-          display_obj.tft.setTextColor(rssiToColorScaled(targ_rssi), TFT_BLACK);
-
-          #ifdef HAS_MINI_SCREEN
-            display_obj.showCenterText(String(targ_rssi).c_str(), (TFT_HEIGHT / 3), false, 2);
-          #else
-            display_obj.showCenterText(String(targ_rssi).c_str(), (TFT_HEIGHT / 3), false, 3);
-          #endif
-
-          display_obj.tft.fillRect(0, (TFT_HEIGHT / 4) * 3, rssiToBarWidth(targ_rssi), 20, rssiToColorScaled(targ_rssi));
-          display_obj.tft.fillRect(rssiToBarWidth(targ_rssi), (TFT_HEIGHT / 4) * 3, TFT_WIDTH, 20, TFT_BLACK);
+          this->drawFoxHuntMeter();
     }
+  #endif
+}
+
+// Shared fox-hunt proximity meter (WiFi SIG_STREN and BLE FOX_HUNT). Target name
+// + big live RSSI, a color-coded signal bar, a WHITE peak-hold marker on the bar
+// at the strongest RSSI seen (your closest approach), a WARMER/COLDER/HOLD trend
+// cue, and a "BEST -xx" readout. Shows SEARCHING when the target hasn't been
+// heard recently (the caller is hopping channels looking for it). Display only.
+void WiFiScan::drawFoxHuntMeter() {
+  #ifdef HAS_SCREEN
+    const int W = TFT_WIDTH;
+    const int H = TFT_HEIGHT;
+    const bool stale =
+        marauder::foxHuntTargetIsStale(millis(), this->fox_hunt_target.last_seen_ms, 1500);
+    const int rssi = this->fox_hunt_target.rssi;
+
+    // Peak-hold: strongest (closest) RSSI seen for this target.
+    if (!stale && rssi > this->fox_peak_rssi) this->fox_peak_rssi = rssi;
+
+    // Warmer / colder vs a slow-moving reference (3 dB hysteresis).
+    int trend = 0;
+    if (!stale) {
+      if (this->fox_trend_ref == -128) this->fox_trend_ref = rssi;
+      const int delta = rssi - this->fox_trend_ref;
+      if (delta >= 3) trend = 1; else if (delta <= -3) trend = -1;
+      this->fox_trend_ref = (int16_t)((this->fox_trend_ref * 3 + rssi) / 4);
+    }
+
+    // Target name (cyan).
+    display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    #ifdef HAS_MINI_SCREEN
+      display_obj.tft.setTextSize(1);
+      display_obj.showCenterText(screenIdentifier(this->fox_hunt_target.name).c_str(), (H / 4), true);
+    #else
+      display_obj.tft.setTextSize(2);
+      display_obj.showCenterText(screenIdentifier(this->fox_hunt_target.name).c_str(), (H / 4), false, 2);
+    #endif
+
+    // Big live RSSI, or SEARCHING when the target has gone quiet.
+    if (stale) {
+      display_obj.tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+      #ifdef HAS_MINI_SCREEN
+        display_obj.showCenterText("...", (H / 3), true);
+      #else
+        display_obj.showCenterText("SEARCHING", (H / 3), false, 2);
+      #endif
+    } else {
+      display_obj.tft.setTextColor(rssiToColorScaled(rssi), TFT_BLACK);
+      #ifdef HAS_MINI_SCREEN
+        display_obj.showCenterText(String(rssi).c_str(), (H / 3), false, 2);
+      #else
+        display_obj.showCenterText(String(rssi).c_str(), (H / 3), false, 3);
+      #endif
+    }
+
+    // Warmer / colder / hold cue.
+    const char* tword = stale ? "" : (trend > 0 ? "WARMER" : (trend < 0 ? "COLDER" : "HOLD"));
+    display_obj.tft.setTextColor(trend > 0 ? TFT_GREEN : (trend < 0 ? TFT_RED : TFT_LIGHTGREY), TFT_BLACK);
+    display_obj.showCenterText(tword, (H / 2), true);
+
+    // Signal bar + peak-hold marker.
+    const int barY = (H / 4) * 3;
+    display_obj.tft.fillRect(0, barY - 4, W, 30, TFT_BLACK);  // clear bar + marker band
+    if (!stale)
+      display_obj.tft.fillRect(0, barY, rssiToBarWidth(rssi), 20, rssiToColorScaled(rssi));
+    if (this->fox_peak_rssi > -128) {
+      int px = rssiToBarWidth(this->fox_peak_rssi);
+      if (px > W - 3) px = W - 3;
+      display_obj.tft.fillRect(px, barY - 3, 3, 26, TFT_WHITE);  // closest-approach marker
+    }
+
+    // "BEST -xx" closest-approach readout (room only on the full screen).
+    #ifndef HAS_MINI_SCREEN
+      display_obj.tft.fillRect(0, barY + 28, W, 14, TFT_BLACK);
+      if (this->fox_peak_rssi > -128) {
+        display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+        display_obj.showCenterText((String("BEST ") + (int)this->fox_peak_rssi).c_str(), barY + 28, true);
+      }
+    #endif
   #endif
 }
 
