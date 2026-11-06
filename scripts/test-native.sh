@@ -87,3 +87,8 @@ g++ -std=c++17 -Wall -Wextra -Werror \
   "${PROJECT_DIR}/tests/native/test_ota.cpp" \
   -o "${TEST_DIR}/test_ota"
 "${TEST_DIR}/test_ota"
+g++ -std=c++17 -Wall -Wextra -Werror \
+  -I"${PROJECT_DIR}/firmware/Marauder" \
+  "${PROJECT_DIR}/tests/native/test_recon.cpp" \
+  -o "${TEST_DIR}/test_recon"
+"${TEST_DIR}/test_recon"

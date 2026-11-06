@@ -25,8 +25,14 @@ class ReconMissionState {
 
   ReconRange consume(ReconSource source, size_t size) {
     size_t& cursor = cursors[static_cast<uint8_t>(source)];
-    if (size < cursor) cursor = 0;
-    const ReconRange range = {cursor, size};
+    // Only entries appended since the last pass are new. The device lists also
+    // shrink while recon runs (stale APs/stations/BLE get pruned), and when a
+    // list shrinks we must NOT rewind the cursor to 0 -- doing so re-counts
+    // every surviving entry as "new" on the next pass, which ballooned the
+    // recon AP/station/BLE tallies to several times the real device count.
+    // A shrink simply yields an empty range; the headline counts are taken
+    // from the live list sizes in ReconMission::observeLists().
+    const ReconRange range = {cursor < size ? cursor : size, size};
     cursor = size;
     return range;
   }

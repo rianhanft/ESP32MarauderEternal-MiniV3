@@ -295,10 +295,13 @@ void ReconMission::pruneStaleDevices(uint32_t current_time) {
 
 void ReconMission::writeObservation(char type, const uint8_t mac[6], int rssi,
                                     uint8_t channel, const char* label) {
-  if (type == 'a') { ap_count++; pending_churn_in++; }
-  else if (type == 's') { station_count++; pending_churn_in++; }
-  else if (type == 'b') { ble_count++; pending_churn_in++; }
-  else if (type == 'i') { ble_count++; ibeacon_count++; pending_churn_in++; }
+  // ap_count / station_count / ble_count mirror the live unique device counts
+  // and are refreshed from the actual list sizes in observeLists(); here we
+  // only advance the cumulative churn-in and iBeacon/update tallies, so a
+  // device that is pruned and later re-observed can't inflate the headline
+  // numbers.
+  if (type == 'a' || type == 's' || type == 'b') pending_churn_in++;
+  else if (type == 'i') { ibeacon_count++; pending_churn_in++; }
   else if (type != 'd') repeat_count++;
   recordUiEvent(type, mac, static_cast<int8_t>(rssi), label);
   recordSignal(static_cast<int8_t>(rssi), channel);
@@ -955,6 +958,10 @@ void ReconMission::observeLists() {
         const AccessPoint& ap = access_points->get(index);
         writeObservation('a', ap.bssid, ap.rssi, ap.channel);
       }
+      // The scan list is already deduplicated by BSSID and pruned of stale
+      // entries, so its size is the true number of unique APs in range --
+      // this is what the headline count must show (matching Scan AP).
+      ap_count = access_points->size();
     }
     if (stations) {
       const ReconRange range = state.consume(ReconSource::STATION_LIST, stations->size());
@@ -969,6 +976,7 @@ void ReconMission::observeLists() {
         }
         writeObservation('s', station.mac, -128, channel);
       }
+      station_count = stations->size();
     }
   } else {
     #ifdef HAS_BT
@@ -979,6 +987,7 @@ void ReconMission::observeLists() {
           writeObservation(device.is_ibeacon ? 'i' : 'b', device.mac, device.rssi, 0,
                            device.device_type.c_str());
         }
+        ble_count = ble_devices->size();
       }
     #endif
   }
