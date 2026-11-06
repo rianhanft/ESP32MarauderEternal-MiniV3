@@ -13977,6 +13977,7 @@ void WiFiScan::main(uint32_t currentTime)
     // / auth). The beacon & spam attacks draw it from displayTransmitRate once a
     // second instead, so they are excluded here. Display only; TX is untouched.
     if ((currentScanMode == WIFI_ATTACK_DEAUTH) ||
+        (currentScanMode == WIFI_ATTACK_DEAUTH_TARGETED) ||
         (currentScanMode == WIFI_ATTACK_BAD_MSG) ||
         (currentScanMode == WIFI_ATTACK_BAD_MSG_TARGETED) ||
         (currentScanMode == WIFI_ATTACK_SLEEP) ||

@@ -5839,9 +5839,9 @@ void MenuFunctions::buildAttackHtmlSelect() {
 }
 
 // "Target Mode": after choosing AP(s) on Choose Targets, decide how every
-// selected AP is hit -- deauth the AP's broadcast (whole BSS), every known
-// client, or a hand-picked subset -- or drop the AP(s) back out of the profile.
-// Operates on the whole selected set at once, matching the official firmware.
+// selected AP is hit -- every known client or a hand-picked subset -- or drop
+// the AP(s) back out of the profile. Targeted attacks deauth specific clients;
+// whole-AP broadcast lives in Deauth Flood, so there is no Broadcast option here.
 void MenuFunctions::buildAttackTargetMode() {
   Menu* m = &attackStationMenu;
   m->list->clear();
@@ -5851,12 +5851,6 @@ void MenuFunctions::buildAttackTargetMode() {
   wifi_scan_obj.beginExtmemAlloc();
   this->addNodes(m, text09, TFTLIGHTGREY, 0, [this]() { this->buildAttackTargets(); });
 
-  // Broadcast: target the AP itself (deauth to the broadcast address), clearing
-  // any per-client picks so the attack hits the whole BSS.
-  this->addNodes(m, "Broadcast", TFTRED, DEAUTH_SNIFF, [this]() {
-    this->setSelectedApStations(false);
-    this->buildAttackReview();
-  });
   // All Stations: select every known client of every selected AP.
   this->addNodes(m, "All Stations", TFTYELLOW, DEAUTH_SNIFF, [this]() {
     this->setSelectedApStations(true);
@@ -5938,7 +5932,7 @@ void MenuFunctions::buildAttackPickStations() {
     }
   }
   if (shown == 0)
-    this->addNodes(m, "(no clients seen - use Broadcast)", TFTDARKGREY, 255, []() {});
+    this->addNodes(m, "(no clients seen - use Deauth Flood)", TFTDARKGREY, 255, []() {});
 
   wifi_scan_obj.endExtmemAlloc();
   this->changeMenu(m, true);
