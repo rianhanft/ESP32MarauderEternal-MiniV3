@@ -13247,11 +13247,13 @@ void WiFiScan::drawFoxHuntMeter() {
 
     // Gauge geometry (dial centred; 270-deg arc open at the bottom).
     #ifdef HAS_MINI_SCREEN
-      const int cx = W / 2, cy = 62, r = 36, ir = 27;
-      const int nameY = 6, nameClrH = 12, numFont = 2, nameFont = 1, trendY = 102;
+      const int cx = W / 2, cy = 64, r = 32, ir = 25;
+      const int nameY = 19, nameClrH = 12, numFont = 2, nameFont = 1, trendY = 92;
+      const int clearTop = 17;  // keep clear of the (taller-than-macro) status bar
     #else
       const int cx = W / 2, cy = 140, r = 66, ir = 52;
       const int nameY = 34, nameClrH = 18, numFont = 4, nameFont = 2, trendY = 212;
+      const int clearTop = STATUS_BAR_WIDTH;
     #endif
     const int startA = 45, endA = 315, sweep = 270;
     const uint16_t trackCol = 0x2124;  // dim slate track
@@ -13260,7 +13262,7 @@ void WiFiScan::drawFoxHuntMeter() {
       // Clear only BELOW the status bar -- fillScreen() would wipe the top
       // status bar too, which then repaints element-by-element on its own timer
       // and flashes black bands across the top for a moment.
-      display_obj.tft.fillRect(0, STATUS_BAR_WIDTH, W, H - STATUS_BAR_WIDTH, TFT_BLACK);
+      display_obj.tft.fillRect(0, clearTop, W, H - clearTop, TFT_BLACK);
       this->fox_needs_clear = false;
     }
 
@@ -13290,17 +13292,14 @@ void WiFiScan::drawFoxHuntMeter() {
     // White peak-hold notch = closest approach so far.
     if (this->fox_peak_rssi > -128) {
       const float pdeg = startA + fracOf(this->fox_peak_rssi) * sweep;
-      int ox, oy, ix, iy; pt(pdeg, r + 3, ox, oy); pt(pdeg, ir - 3, ix, iy);
+      int ox, oy, ix, iy; pt(pdeg, r + 2, ox, oy); pt(pdeg, ir + 1, ix, iy);
       display_obj.tft.drawWedgeLine(ox, oy, ix, iy, 2.0f, 2.0f, TFT_WHITE, TFT_BLACK);
     }
 
-    // Centre: big live RSSI, or "--" while searching.
+    // Centre: big live RSSI, or "--" while searching. Clear a CIRCLE inside the
+    // ring (never a rect, which would poke through the arc on a small screen).
     display_obj.tft.setTextDatum(MC_DATUM);
-    #ifdef HAS_MINI_SCREEN
-      display_obj.tft.fillRect(cx - 28, cy - 14, 56, 28, TFT_BLACK);
-    #else
-      display_obj.tft.fillRect(cx - 46, cy - 24, 92, 48, TFT_BLACK);
-    #endif
+    display_obj.tft.fillCircle(cx, cy, ir - 2, TFT_BLACK);
     if (stale) {
       display_obj.tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
       display_obj.tft.drawString("--", cx, cy, numFont);
