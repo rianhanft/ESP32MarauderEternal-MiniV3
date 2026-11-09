@@ -30,7 +30,10 @@ case "${BOARD}" in
   # Native-USB dongle: no UART bridge, so Serial must ride the built-in USB
   # (CDCOnBoot=cdc) for the CLI / web remote to reach it over the USB-A plug.
   TDONGLE_C5) FLAG="MARAUDER_T_DONGLE_C5"; TFT="User_Setup_t_dongle_c5.h";
-            FQBN="esp32:esp32:esp32c5:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,CDCOnBoot=cdc" ;;
+            # 16 MB flash, two 3 MiB OTA app slots (app3M_fat9M_16MB): app0 ota_0
+            # @ 0x10000 (3 MiB) + app1 ota_1 (3 MiB) + 9.9 MB FATFS -- matches the
+            # T-Dongle C5's actual flash and JCMK's target layout.
+            FQBN="esp32:esp32:esp32c5:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=enabled,CDCOnBoot=cdc" ;;
   *) echo "Unknown board '${BOARD}'. Use PANCAKE|V8|MINI_V3|WS_C5_35|TDONGLE_C5." >&2; exit 2 ;;
 esac
 

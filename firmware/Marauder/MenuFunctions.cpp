@@ -735,7 +735,11 @@ void MenuFunctions::main(uint32_t currentTime)
           wifi_scan_obj.StartScan(WIFI_SCAN_OFF);
 
           // Restore display state without full reinit to avoid screen flash
-          #if defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV)
+          #if defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV) || defined(MARAUDER_T_DONGLE_C5)
+            // T-Dongle: the panel shares the SPI bus with the SD card, so a full
+            // tft.init() (which re-runs SPI.begin) while an attack is tearing
+            // down crashed the dongle. Do the light, re-init-free restore like
+            // the Cardputer instead.
             display_obj.tft.setRotation(SCREEN_ORIENTATION);
             display_obj.clearScreen();
           #else
