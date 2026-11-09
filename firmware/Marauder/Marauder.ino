@@ -581,7 +581,9 @@ void loop()
     csi_motion_obj.main(currentTime);
   #endif
 
-  #ifdef HAS_T_DONGLE_DISPLAY
+  // With the on-device menu enabled (HAS_SCREEN) the full menu owns the panel;
+  // skip the CLI status-screen redraw so the two don't fight over the display.
+  #if defined(HAS_T_DONGLE_DISPLAY) && !defined(HAS_SCREEN)
     t_dongle_display.update(currentTime, wifi_scan_obj);
   #endif
 

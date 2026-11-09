@@ -614,6 +614,13 @@
   #ifdef MARAUDER_T_DONGLE_C5
     #define HAS_BT
     #define HAS_T_DONGLE_DISPLAY
+    // Experimental on-device UI (to mirror JCMK's T-Dongle): render the full
+    // menu on the 160x80 screen with the compact HAS_MINI_SCREEN layout, driven
+    // by single-button BOOT navigation. Built in stages; see the button block
+    // and the DISPLAY DEFINITIONS T-Dongle block below.
+    #define HAS_SCREEN
+    #define HAS_MINI_SCREEN
+    #define HAS_BUTTONS
     // APA102 status LED DISABLED on purpose: on the T-Dongle C5 it is wired to
     // GPIO2 and GPIO6 -- which are the SD card's MOSI and SCK lines. Driving the
     // LED bit-bangs those pins into GPIO mode and leaves them there, so the next
@@ -781,6 +788,23 @@
 
   //// BUTTON DEFINITIONS
   #ifdef HAS_BUTTONS
+
+    #ifdef MARAUDER_T_DONGLE_C5
+      // Single BOOT button on GPIO28 (active-low). Only the center/select
+      // button is wired; tap/hold single-button navigation is handled in the
+      // menu loop (there is no U/D/L/R on this dongle).
+      #define L_BTN -1
+      #define C_BTN 28
+      #define U_BTN -1
+      #define R_BTN -1
+      #define D_BTN -1
+      #define HAS_C
+      #define L_PULL true
+      #define C_PULL true
+      #define U_PULL true
+      #define R_PULL true
+      #define D_PULL true
+    #endif
 
     #ifdef MARAUDER_REV_FEATHER
       #define L_BTN -1
@@ -1149,6 +1173,45 @@
 
   //// DISPLAY DEFINITIONS
   #ifdef HAS_SCREEN
+
+    #ifdef MARAUDER_T_DONGLE_C5
+      // 160x80 ST7735 in landscape. The TFT pins come from the TFT_eSPI
+      // User_Setup (User_Setup_t_dongle_c5.h), so only layout metrics are set
+      // here (modelled on the Mini V3's compact HAS_MINI_SCREEN block).
+      #define CHAN_PER_PAGE 7
+      #define SCREEN_CHAR_WIDTH 26
+      #define SCREEN_BUFFER
+      #define MAX_SCREEN_BUFFER 7
+      #define BANNER_TEXT_SIZE 1
+      #ifndef TFT_WIDTH
+        #define TFT_WIDTH 80
+      #endif
+      #ifndef TFT_HEIGHT
+        #define TFT_HEIGHT 160
+      #endif
+      #define SCREEN_ORIENTATION 3          // landscape (matches TDongleDisplay's rotation)
+      #define SCREEN_WIDTH TFT_HEIGHT        // 160
+      #define SCREEN_HEIGHT TFT_WIDTH        // 80
+      #define GRAPH_VERT_LIM (SCREEN_HEIGHT/2 - 1)
+      #define EXT_BUTTON_WIDTH 0
+      #define CHAR_WIDTH 6
+      #define HEIGHT_1 SCREEN_HEIGHT
+      #define WIDTH_1 SCREEN_WIDTH
+      #define STANDARD_FONT_CHAR_LIMIT (SCREEN_WIDTH/6)
+      #define TEXT_HEIGHT (SCREEN_HEIGHT/8)
+      #define BOT_FIXED_AREA 0
+      #define TOP_FIXED_AREA 16
+      #define YMAX SCREEN_HEIGHT
+      #ifndef minimum
+        #define minimum(a,b)     (((a) < (b)) ? (a) : (b))
+      #endif
+      #define MENU_FONT NULL                // built-in 6px font fits 160x80
+      #define BUTTON_SCREEN_LIMIT 5         // menu items per page on the small screen
+      #define BUTTON_ARRAY_LEN BUTTON_SCREEN_LIMIT
+      #define STATUS_BAR_WIDTH (TFT_HEIGHT/16)   // ~10px status bar
+      #define LVGL_TICK_PERIOD 6
+      #define STATUSBAR_COLOR 0x4A49
+    #endif
 
     #if defined(MARAUDER_M5STACK_CORE2_AWS)
       #define CHAN_PER_PAGE 14
@@ -2451,6 +2514,23 @@
   //// END DISPLAY DEFINITIONS
 
   //// MENU DEFINITIONS
+  #ifdef MARAUDER_T_DONGLE_C5
+    #define BANNER_TIME 50
+    #define COMMAND_PREFIX "!"
+    // Keypad start position, key sizes and spacing for the 160x80 landscape
+    // menu (SCREEN_WIDTH 160 / SCREEN_HEIGHT 80).
+    #define KEY_X (SCREEN_WIDTH/2)   // centre of key (80)
+    #define KEY_Y 22                 // first row, just below the status bar
+    #define KEY_W SCREEN_WIDTH       // full width (160)
+    #define KEY_H 11                 // compact rows -> ~5 per page
+    #define KEY_SPACING_X 0
+    #define KEY_SPACING_Y 1
+    #define KEY_TEXTSIZE 1
+    #define ICON_W 10
+    #define ICON_H 10
+    #define BUTTON_PADDING 10
+  #endif
+
   #if defined(MARAUDER_M5STACK_CORE2_AWS)
     #define BANNER_TIME 50
     #define COMMAND_PREFIX "!"
