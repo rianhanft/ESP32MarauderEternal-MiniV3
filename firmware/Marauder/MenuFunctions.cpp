@@ -4751,6 +4751,10 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
       this->addNodes(menu, "NyanBox", TFTMAGENTA, GENERAL_APPS, [this]() {
         this->changeMenu(&nyanBoxMenu, true);
       });
+      this->addNodes(menu, text08, TFTBLUE, SETTINGS, [this]() {
+        settingsMenu.parentMenu = &mainMenu;   // Back returns to the start screen
+        this->changeMenu(&settingsMenu, true);
+      });
       this->addNodes(menu, text_table1[9], TFTBLUE, DEVICE, [this]() {
         this->changeMenu(&deviceMenu, true);
       });
@@ -5394,6 +5398,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         wifi_scan_obj.RunInfo();
       });
       this->addNodes(menu, text08, TFTBLUE, SETTINGS, [this]() {
+        settingsMenu.parentMenu = &deviceMenu;   // Back returns to the Device menu
         this->changeMenu(&settingsMenu, true);
       });
       this->addNodes(menu, "Geofences", TFTGREEN, GPS_MENU, [this]() {

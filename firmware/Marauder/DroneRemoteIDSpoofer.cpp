@@ -23,6 +23,7 @@
 
 #include "Display.h"
 #include "Switches.h"
+#include "NyanBoxInput.h"   // rotation-aware screen metrics (nbScreenW/H)
 
 extern Display display_obj;
 extern Switches c_btn;
@@ -213,18 +214,49 @@ void drawStatus(uint32_t started, uint32_t blePackets, uint32_t wifiPackets,
   const uint32_t remaining = elapsed >= MAX_RUNTIME_MS ? 0 :
       (MAX_RUNTIME_MS - elapsed + 999) / 1000;
   display_obj.tft.fillScreen(TFT_BLACK);
-  display_obj.tft.fillRect(0, 0, TFT_WIDTH, 16, TFT_RED);
+  display_obj.tft.fillRect(0, 0, nbScreenW(), 16, TFT_RED);
   display_obj.tft.setTextDatum(TC_DATUM);
   display_obj.tft.setTextSize(1);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_RED);
-  display_obj.tft.drawString("AUTHORIZED DRONE SPOOF", TFT_WIDTH / 2, 4, 1);
+  display_obj.tft.drawString("AUTHORIZED DRONE SPOOF", nbScreenW() / 2, 4, 1);
   display_obj.tft.setTextDatum(TL_DATUM);
   display_obj.tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-  display_obj.tft.setViewport(2, 19, TFT_WIDTH - 4, 14);
+  display_obj.tft.setViewport(2, 19, nbScreenW() - 4, 14);
   display_obj.tft.setCursor(0, 2);
   display_obj.tft.print(selectedTarget.id);
   display_obj.tft.resetViewport();
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+#ifdef SINGLE_BUTTON_NAV
+  // Compact 160x80 (dongle) layout: the stacked per-radio detail lines run off
+  // the short panel, so condense them to one line and keep what matters on a
+  // single screen -- the live GPS/track status and the run/countdown line.
+  display_obj.tft.drawString(String("Types:") + messageCount +
+      "  BLE:" + (bleOkay ? "on" : "x") + " WiFi:" + (wifiOkay ? "on" : "x"),
+      4, 33, 1);
+  #ifdef HAS_GPS
+    uint16_t gpsColor = TFT_DARKGREY;
+    String gpsText = "GPS: captured loc";
+    if (gpsState == GPS_TRACKING) {
+      gpsColor = TFT_GREEN;
+      gpsText = String("GPS ") + gps_obj.getLat() + "," + gps_obj.getLon();
+    } else if (gpsState == GPS_NO_LOC_MSG) {
+      gpsColor = TFT_ORANGE;
+      gpsText = "GPS: no loc msg";
+    }
+    display_obj.tft.setTextColor(gpsColor, TFT_BLACK);
+    display_obj.tft.setViewport(4, 47, nbScreenW() - 8, 13);
+    display_obj.tft.setCursor(0, 2);
+    display_obj.tft.print(gpsText);
+    display_obj.tft.resetViewport();
+  #else
+    (void)gpsState;
+  #endif
+  display_obj.tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+  if (autoStop)
+    display_obj.tft.drawString(String("Auto stop: ") + remaining + "s", 4, 59, 1);
+  else
+    display_obj.tft.drawString("Running (no auto-stop)", 4, 59, 1);
+#else
   display_obj.tft.drawString(String("Captured types: ") + messageCount,
                              4, 36, 1);
   display_obj.tft.drawString(String("BLE: ") + (bleOkay ? "on " : "failed ") +
@@ -245,7 +277,7 @@ void drawStatus(uint32_t started, uint32_t blePackets, uint32_t wifiPackets,
       gpsText = "GPS fix: target has no loc msg";
     }
     display_obj.tft.setTextColor(gpsColor, TFT_BLACK);
-    display_obj.tft.setViewport(4, 78, TFT_WIDTH - 8, 13);
+    display_obj.tft.setViewport(4, 78, nbScreenW() - 8, 13);
     display_obj.tft.setCursor(0, 2);
     display_obj.tft.print(gpsText);
     display_obj.tft.resetViewport();
@@ -253,7 +285,7 @@ void drawStatus(uint32_t started, uint32_t blePackets, uint32_t wifiPackets,
   #else
     (void)gpsState;
   #endif
-  display_obj.tft.setViewport(4, 92, TFT_WIDTH - 8, 13);
+  display_obj.tft.setViewport(4, 92, nbScreenW() - 8, 13);
   display_obj.tft.setCursor(0, 2);
   display_obj.tft.print(selectedTarget.address);
   display_obj.tft.resetViewport();
@@ -262,9 +294,14 @@ void drawStatus(uint32_t started, uint32_t blePackets, uint32_t wifiPackets,
     display_obj.tft.drawString(String("Auto stop: ") + remaining + "s", 4, 106, 1);
   else
     display_obj.tft.drawString("Running (no auto-stop)", 4, 106, 1);
+#endif
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
-  display_obj.tft.print(F("Center: stop now"));
+  display_obj.tft.setCursor(2, nbScreenH() - 9);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.print(F("Tap BOOT: stop now"));
+  #else
+    display_obj.tft.print(F("Center: stop now"));
+  #endif
 }
 
 void drawError(const char* message) {
@@ -275,8 +312,12 @@ void drawError(const char* message) {
   display_obj.tft.print(message);
   display_obj.tft.setTextWrap(false);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  display_obj.tft.setCursor(4, TFT_HEIGHT - 12);
-  display_obj.tft.print(F("Center: return"));
+  display_obj.tft.setCursor(4, nbScreenH() - 12);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.print(F("Tap BOOT: return"));
+  #else
+    display_obj.tft.print(F("Center: return"));
+  #endif
 }
 
 }  // namespace
@@ -474,8 +515,8 @@ void run(bool autoStop) {
     display_obj.tft.fillScreen(TFT_BLACK);
     display_obj.tft.setTextDatum(MC_DATUM);
     display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
-    display_obj.tft.drawString("Spoof complete", TFT_WIDTH / 2, (TFT_HEIGHT / 2) - 10, 2);
-    display_obj.tft.drawString("Resetting radio...", TFT_WIDTH / 2, (TFT_HEIGHT / 2) + 10, 2);
+    display_obj.tft.drawString("Spoof complete", nbScreenW() / 2, (nbScreenH() / 2) - 10, 2);
+    display_obj.tft.drawString("Resetting radio...", nbScreenW() / 2, (nbScreenH() / 2) + 10, 2);
     display_obj.tft.setTextDatum(TL_DATUM);
   #endif
   delay(1500);

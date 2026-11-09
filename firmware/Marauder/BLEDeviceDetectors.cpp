@@ -7,7 +7,8 @@
 #if defined(HAS_BT) && defined(HAS_NIMBLE_2) && defined(HAS_SCREEN) && ( \
       (defined(HAS_BUTTONS) && (U_BTN >= 0) && (D_BTN >= 0) && \
        (L_BTN >= 0) && (R_BTN >= 0) && (C_BTN >= 0)) \
-      || defined(HAS_TOUCH) )
+      || defined(HAS_TOUCH) \
+      || (defined(SINGLE_BUTTON_NAV) && (C_BTN >= 0)) )
 
 #include <NimBLEDevice.h>
 #include <esp_bt.h>
@@ -17,6 +18,7 @@
 
 #include "Display.h"
 #include "Switches.h"
+#include "NyanBoxInput.h"   // single-button nav + rotation-aware screen metrics
 
 extern Display display_obj;
 extern Switches u_btn;
@@ -32,7 +34,11 @@ namespace {
 // nyanBOX project. The scanner/UI are original Mini V3 implementations.
 // https://github.com/jbohack/nyanBOX
 constexpr uint8_t MAX_RESULTS = 32;
+#ifdef SINGLE_BUTTON_NAV
+constexpr uint8_t VISIBLE_ROWS = 3;   // short 160x80 dongle panel fits ~3 rows
+#else
 constexpr uint8_t VISIBLE_ROWS = 6;
+#endif
 constexpr int16_t HEADER_HEIGHT = 16;
 constexpr int16_t ROW_START_Y = 29;
 constexpr int16_t ROW_HEIGHT = 14;
@@ -122,11 +128,15 @@ void releaseButton(Switches& button) {
 }
 
 void releaseControls() {
+#ifdef SINGLE_BUTTON_NAV
+  releaseButton(c_btn);           // only the BOOT button exists on the dongle
+#else
   releaseButton(u_btn);
   releaseButton(d_btn);
   releaseButton(l_btn);
   releaseButton(r_btn);
   releaseButton(c_btn);
+#endif
 }
 
 bool startsWithIgnoreCase(const char* value, const char* prefix) {
@@ -315,11 +325,11 @@ void resetResults() {
 }
 
 void drawHeader() {
-  display_obj.tft.fillRect(0, 0, TFT_WIDTH, HEADER_HEIGHT, TFT_NAVY);
+  display_obj.tft.fillRect(0, 0, nbScreenW(), HEADER_HEIGHT, TFT_NAVY);
   display_obj.tft.setTextDatum(TC_DATUM);
   display_obj.tft.setTextSize(1);
   display_obj.tft.setTextColor(TFT_CYAN, TFT_NAVY);
-  display_obj.tft.drawString(detectorTitle(activeDetector), TFT_WIDTH / 2, 4, 1);
+  display_obj.tft.drawString(detectorTitle(activeDetector), nbScreenW() / 2, 4, 1);
   display_obj.tft.setTextDatum(TL_DATUM);
 }
 
@@ -330,7 +340,11 @@ void drawList(uint8_t selected) {
   drawHeader();
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
   display_obj.tft.setCursor(2, 18);
-  display_obj.tft.printf("Found:%u  R:detail", count);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.printf("Found:%u", count);
+  #else
+    display_obj.tft.printf("Found:%u  R:detail", count);
+  #endif
 
   uint8_t start = 0;
   if (selected >= VISIBLE_ROWS)
@@ -342,26 +356,30 @@ void drawList(uint8_t selected) {
     const bool highlighted = index == selected;
     const uint16_t background = highlighted ? TFT_CYAN : TFT_BLACK;
     const uint16_t foreground = highlighted ? TFT_BLACK : TFT_CYAN;
-    display_obj.tft.fillRect(0, y, TFT_WIDTH, ROW_HEIGHT - 1, background);
+    display_obj.tft.fillRect(0, y, nbScreenW(), ROW_HEIGHT - 1, background);
     display_obj.tft.setTextColor(foreground, background);
-    display_obj.tft.setViewport(2, y, TFT_WIDTH - 4, ROW_HEIGHT - 1);
+    display_obj.tft.setViewport(2, y, nbScreenW() - 4, ROW_HEIGHT - 1);
     display_obj.tft.setCursor(0, 2);
     display_obj.tft.printf("%d %s", snapshot[index].rssi,
                            snapshot[index].name);
     display_obj.tft.resetViewport();
   }
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
-  display_obj.tft.print(F("Center: exit"));
+  display_obj.tft.setCursor(2, nbScreenH() - 9);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.print(F("Tap:next  Hold:exit"));
+  #else
+    display_obj.tft.print(F("Center: exit"));
+  #endif
 }
 
 template <typename Canvas>
 void drawIBeaconTo(Canvas& canvas, const Detection& item, bool preview = false) {
   canvas.fillScreen(TFT_BLACK);
   canvas.setFreeFont(nullptr); canvas.setTextSize(1); canvas.setTextWrap(false);
-  canvas.fillRect(0, 0, TFT_WIDTH, HEADER_HEIGHT, TFT_NAVY);
+  canvas.fillRect(0, 0, nbScreenW(), HEADER_HEIGHT, TFT_NAVY);
   canvas.setTextDatum(TC_DATUM); canvas.setTextColor(TFT_CYAN, TFT_NAVY);
-  canvas.drawString(preview ? "TEST IBEACON" : "IBEACON DETAILS", TFT_WIDTH / 2, 4, 1);
+  canvas.drawString(preview ? "TEST IBEACON" : "IBEACON DETAILS", nbScreenW() / 2, 4, 1);
   canvas.setTextDatum(TL_DATUM); canvas.setTextColor(TFT_YELLOW, TFT_BLACK);
   canvas.drawString("UUID", 2, 20, 1);
   char uuid[37]; marauder::formatIBeaconUuid(item.beacon, uuid, sizeof(uuid));
@@ -373,7 +391,7 @@ void drawIBeaconTo(Canvas& canvas, const Detection& item, bool preview = false) 
   canvas.drawString("Measured: " + String(item.beacon.measured_power) + "dBm", 2, 86, 1);
   canvas.drawString("RSSI: " + String(item.rssi) + "dBm #" + String(item.advertisements), 2, 100, 1);
   canvas.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  canvas.drawString("L:list R:info C:exit", 2, TFT_HEIGHT - 9, 1);
+  canvas.drawString("L:list R:info C:exit", 2, nbScreenH() - 9, 1);
 }
 
 void drawDetail(uint8_t selected, uint8_t page) {
@@ -405,7 +423,7 @@ void drawDetail(uint8_t selected, uint8_t page) {
   display_obj.tft.print(item.detail);
   display_obj.tft.setTextWrap(false);
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
+  display_obj.tft.setCursor(2, nbScreenH() - 9);
   display_obj.tft.print(item.isIBeacon ? F("L:list R:UUID C:exit") : F("Left: list  Center: exit"));
 }
 
@@ -418,7 +436,7 @@ void showError(const char* message) {
   display_obj.tft.print(message);
   display_obj.tft.setTextWrap(false);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  display_obj.tft.setCursor(4, TFT_HEIGHT - 12);
+  display_obj.tft.setCursor(4, nbScreenH() - 12);
   display_obj.tft.print(F("Center: exit"));
 }
 
@@ -445,6 +463,9 @@ void run(DetectorType detector, uint32_t durationMs, bool fromSerial) {
   uint8_t selected = 0;
   bool detailView = false;
   uint8_t detailPage = 0;
+  #ifdef SINGLE_BUTTON_NAV
+    NyanBoxInput::SingleButton sbState;   // BOOT: tap=next, hold=exit
+  #endif
   uint32_t lastDraw = 0;
   const uint32_t startedMs = millis();
   uint32_t drawnRevision = UINT32_MAX;
@@ -454,8 +475,15 @@ void run(DetectorType detector, uint32_t durationMs, bool fromSerial) {
 
   Serial.printf("BLE detector radio: %s\n", scanning ? "ready" : "failed");
   while (true) {
-    if ((durationMs && uint32_t(millis() - startedMs) >= durationMs) || c_btn.justPressed())
-      break;
+    #ifdef SINGLE_BUTTON_NAV
+      const NyanBoxInput::Event sbEv = NyanBoxInput::poll(c_btn, sbState);
+      if ((durationMs && uint32_t(millis() - startedMs) >= durationMs) ||
+          sbEv == NyanBoxInput::HOLD)        // hold BOOT = exit
+        break;
+    #else
+      if ((durationMs && uint32_t(millis() - startedMs) >= durationMs) || c_btn.justPressed())
+        break;
+    #endif
     if (fromSerial && Serial.available()) {  // web "Stop"/stopscan ends the tool
       while (Serial.available()) Serial.read();
       break;
@@ -473,6 +501,14 @@ void run(DetectorType detector, uint32_t durationMs, bool fromSerial) {
       selected = count - 1;
 
     bool redraw = revision != drawnRevision;
+    #ifdef SINGLE_BUTTON_NAV
+      // One BOOT button: tap cycles through the live list (wrapping). No detail
+      // view (that needs L/R); hold exits (handled at the top of the loop).
+      if (sbEv == NyanBoxInput::TAP && count > 0) {
+        selected = (selected + 1) % count;
+        redraw = true;
+      }
+    #else
     if (u_btn.justPressed() && selected > 0) {
       selected--;
       redraw = true;
@@ -490,6 +526,7 @@ void run(DetectorType detector, uint32_t durationMs, bool fromSerial) {
       detailView = false;
       redraw = true;
     }
+    #endif
     if (detailView && static_cast<int32_t>(millis() - nextAgeRefresh) >= 0) {
       nextAgeRefresh = millis() + 1000;
       redraw = true;

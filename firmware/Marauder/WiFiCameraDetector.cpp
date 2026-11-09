@@ -8,7 +8,8 @@
 #if defined(HAS_SCREEN) && ( \
       (defined(HAS_BUTTONS) && (U_BTN >= 0) && (D_BTN >= 0) && \
        (L_BTN >= 0) && (R_BTN >= 0) && (C_BTN >= 0)) \
-      || defined(HAS_TOUCH) )
+      || defined(HAS_TOUCH) \
+      || (defined(SINGLE_BUTTON_NAV) && (C_BTN >= 0)) )
 
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -16,6 +17,7 @@
 
 #include "Display.h"
 #include "Switches.h"
+#include "NyanBoxInput.h"   // single-button nav + rotation-aware screen metrics
 
 extern Display display_obj;
 extern Switches u_btn;
@@ -33,7 +35,11 @@ namespace {
 // https://github.com/jbohack/nyanBOX
 constexpr uint8_t MAX_RESULTS = 32;
 constexpr uint8_t MAX_EUFY_NETWORKS = 8;
+#ifdef SINGLE_BUTTON_NAV
+constexpr uint8_t VISIBLE_ROWS = 3;   // short 160x80 dongle panel fits ~3 rows
+#else
 constexpr uint8_t VISIBLE_ROWS = 6;
+#endif
 constexpr uint16_t CHANNEL_DWELL_MS = 350;
 constexpr int16_t HEADER_HEIGHT = 16;
 constexpr int16_t ROW_START_Y = 29;
@@ -256,11 +262,15 @@ void releaseButton(Switches& button) {
 }
 
 void releaseControls() {
+#ifdef SINGLE_BUTTON_NAV
+  releaseButton(c_btn);           // only the BOOT button exists on the dongle
+#else
   releaseButton(u_btn);
   releaseButton(d_btn);
   releaseButton(l_btn);
   releaseButton(r_btn);
   releaseButton(c_btn);
+#endif
 }
 
 void formatAddress(const uint8_t* address, char* output, size_t outputSize) {
@@ -522,11 +532,11 @@ void resetResults() {
 }
 
 void drawHeader() {
-  display_obj.tft.fillRect(0, 0, TFT_WIDTH, HEADER_HEIGHT, TFT_NAVY);
+  display_obj.tft.fillRect(0, 0, nbScreenW(), HEADER_HEIGHT, TFT_NAVY);
   display_obj.tft.setTextDatum(TC_DATUM);
   display_obj.tft.setTextSize(1);
   display_obj.tft.setTextColor(TFT_CYAN, TFT_NAVY);
-  display_obj.tft.drawString("CAMERA CANDIDATES", TFT_WIDTH / 2, 4, 1);
+  display_obj.tft.drawString("CAMERA CANDIDATES", nbScreenW() / 2, 4, 1);
   display_obj.tft.setTextDatum(TL_DATUM);
 }
 
@@ -536,7 +546,11 @@ void drawList(uint8_t selected) {
   drawHeader();
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
   display_obj.tft.setCursor(2, 18);
-  display_obj.tft.printf("Found:%u Ch:%u R:detail", count, scanChannel);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.printf("Found:%u Ch:%u", count, scanChannel);
+  #else
+    display_obj.tft.printf("Found:%u Ch:%u R:detail", count, scanChannel);
+  #endif
 
   uint8_t start = 0;
   if (selected >= VISIBLE_ROWS)
@@ -548,9 +562,9 @@ void drawList(uint8_t selected) {
     const bool highlighted = index == selected;
     const uint16_t background = highlighted ? TFT_CYAN : TFT_BLACK;
     const uint16_t foreground = highlighted ? TFT_BLACK : TFT_CYAN;
-    display_obj.tft.fillRect(0, y, TFT_WIDTH, ROW_HEIGHT - 1, background);
+    display_obj.tft.fillRect(0, y, nbScreenW(), ROW_HEIGHT - 1, background);
     display_obj.tft.setTextColor(foreground, background);
-    display_obj.tft.setViewport(2, y, TFT_WIDTH - 4, ROW_HEIGHT - 1);
+    display_obj.tft.setViewport(2, y, nbScreenW() - 4, ROW_HEIGHT - 1);
     display_obj.tft.setCursor(0, 2);
     const char confidence = uiSnapshot[index].confidence >= CONFIDENCE_HIGH ?
         'H' : (uiSnapshot[index].confidence >= CONFIDENCE_MEDIUM ? 'M' : 'L');
@@ -559,8 +573,12 @@ void drawList(uint8_t selected) {
     display_obj.tft.resetViewport();
   }
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
-  display_obj.tft.print(F("Center: exit"));
+  display_obj.tft.setCursor(2, nbScreenH() - 9);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.print(F("Tap:next  Hold:exit"));
+  #else
+    display_obj.tft.print(F("Center: exit"));
+  #endif
 }
 
 void drawDetail(uint8_t selected) {
@@ -586,12 +604,12 @@ void drawDetail(uint8_t selected) {
       item.confidence >= CONFIDENCE_HIGH ? "High" :
       (item.confidence >= CONFIDENCE_MEDIUM ? "Medium" : "Low"),
       item.evidence);
-  display_obj.tft.setViewport(2, 89, TFT_WIDTH - 4, 13);
+  display_obj.tft.setViewport(2, 89, nbScreenW() - 4, 13);
   display_obj.tft.setCursor(0, 2);
   display_obj.tft.print(item.ssid[0] ? item.ssid : "SSID not observed");
   display_obj.tft.resetViewport();
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
+  display_obj.tft.setCursor(2, nbScreenH() - 9);
   display_obj.tft.print(F("Left:list Center:exit"));
 }
 
@@ -604,7 +622,7 @@ void showError(const char* message) {
   display_obj.tft.print(message);
   display_obj.tft.setTextWrap(false);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  display_obj.tft.setCursor(4, TFT_HEIGHT - 12);
+  display_obj.tft.setCursor(4, nbScreenH() - 12);
   display_obj.tft.print(F("Center: exit"));
 }
 
@@ -641,11 +659,11 @@ void stopPassiveScan() {
 void drawDeauthList(uint8_t selected) {
   const uint8_t count = copyResults(uiSnapshot);
   display_obj.tft.fillScreen(TFT_BLACK);
-  display_obj.tft.fillRect(0, 0, TFT_WIDTH, HEADER_HEIGHT, TFT_RED);
+  display_obj.tft.fillRect(0, 0, nbScreenW(), HEADER_HEIGHT, TFT_RED);
   display_obj.tft.setTextDatum(TC_DATUM);
   display_obj.tft.setTextSize(1);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_RED);
-  display_obj.tft.drawString("CAMERA DEAUTH", TFT_WIDTH / 2, 4, 1);
+  display_obj.tft.drawString("CAMERA DEAUTH", nbScreenW() / 2, 4, 1);
   display_obj.tft.setTextDatum(TL_DATUM);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
   display_obj.tft.setCursor(2, 18);
@@ -661,9 +679,9 @@ void drawDeauthList(uint8_t selected) {
     const bool highlighted = index == selected;
     const uint16_t background = highlighted ? TFT_RED : TFT_BLACK;
     const uint16_t foreground = highlighted ? TFT_WHITE : TFT_RED;
-    display_obj.tft.fillRect(0, y, TFT_WIDTH, ROW_HEIGHT - 1, background);
+    display_obj.tft.fillRect(0, y, nbScreenW(), ROW_HEIGHT - 1, background);
     display_obj.tft.setTextColor(foreground, background);
-    display_obj.tft.setViewport(2, y, TFT_WIDTH - 4, ROW_HEIGHT - 1);
+    display_obj.tft.setViewport(2, y, nbScreenW() - 4, ROW_HEIGHT - 1);
     display_obj.tft.setCursor(0, 2);
     const char confidence = uiSnapshot[index].confidence >= CONFIDENCE_HIGH ?
         'H' : (uiSnapshot[index].confidence >= CONFIDENCE_MEDIUM ? 'M' : 'L');
@@ -673,7 +691,7 @@ void drawDeauthList(uint8_t selected) {
     display_obj.tft.resetViewport();
   }
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
+  display_obj.tft.setCursor(2, nbScreenH() - 9);
   display_obj.tft.print(F("Center: exit"));
 }
 
@@ -772,7 +790,7 @@ void drawScopeOption(int16_t y, const String& label, bool selected,
   const uint16_t background = selected ? TFT_RED : TFT_BLACK;
   const uint16_t foreground = selected ? TFT_WHITE :
       (enabled ? TFT_RED : TFT_DARKGREY);
-  display_obj.tft.fillRect(0, y, TFT_WIDTH, 13, background);
+  display_obj.tft.fillRect(0, y, nbScreenW(), 13, background);
   display_obj.tft.setTextColor(foreground, background);
   display_obj.tft.drawString(label, 2, y + 2, 1);
 }
@@ -780,11 +798,11 @@ void drawScopeOption(int16_t y, const String& label, bool selected,
 void drawDeauthScope(const Detection& item, const DeauthTarget& brandPlan,
                      uint8_t scopeChoice, bool brandAvailable) {
   display_obj.tft.fillScreen(TFT_BLACK);
-  display_obj.tft.fillRect(0, 0, TFT_WIDTH, HEADER_HEIGHT, TFT_RED);
+  display_obj.tft.fillRect(0, 0, nbScreenW(), HEADER_HEIGHT, TFT_RED);
   display_obj.tft.setTextDatum(TC_DATUM);
   display_obj.tft.setTextSize(1);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_RED);
-  display_obj.tft.drawString("TARGET SCOPE", TFT_WIDTH / 2, 4, 1);
+  display_obj.tft.drawString("TARGET SCOPE", nbScreenW() / 2, 4, 1);
   display_obj.tft.setTextDatum(TL_DATUM);
 
   String brandLine = String("All ") + item.vendor;
@@ -807,11 +825,11 @@ void drawDeauthScope(const Detection& item, const DeauthTarget& brandPlan,
 
 void drawDeauthConfirm(const DeauthTarget& plan) {
   display_obj.tft.fillScreen(TFT_BLACK);
-  display_obj.tft.fillRect(0, 0, TFT_WIDTH, HEADER_HEIGHT, TFT_RED);
+  display_obj.tft.fillRect(0, 0, nbScreenW(), HEADER_HEIGHT, TFT_RED);
   display_obj.tft.setTextDatum(TC_DATUM);
   display_obj.tft.setTextSize(1);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_RED);
-  display_obj.tft.drawString("AUTHORIZED TEST?", TFT_WIDTH / 2, 4, 1);
+  display_obj.tft.drawString("AUTHORIZED TEST?", nbScreenW() / 2, 4, 1);
   display_obj.tft.setTextDatum(TL_DATUM);
   display_obj.tft.setTextColor(TFT_YELLOW, TFT_BLACK);
   display_obj.tft.drawString(plan.vendor, 2, 22, 1);
@@ -842,13 +860,13 @@ void drawDeauthPreflight(const DeauthTarget& plan, uint8_t selected) {
   formatAddress(plan.links[selected].bssid, bssid, sizeof(bssid));
 
   display_obj.tft.fillScreen(TFT_BLACK);
-  display_obj.tft.fillRect(0, 0, TFT_WIDTH, HEADER_HEIGHT, TFT_RED);
+  display_obj.tft.fillRect(0, 0, nbScreenW(), HEADER_HEIGHT, TFT_RED);
   display_obj.tft.setTextDatum(TC_DATUM);
   display_obj.tft.setTextSize(1);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_RED);
   display_obj.tft.drawString(
       String("PREFLIGHT ") + (selected + 1) + "/" + plan.count,
-      TFT_WIDTH / 2, 4, 1);
+      nbScreenW() / 2, 4, 1);
   display_obj.tft.setTextDatum(TL_DATUM);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
   display_obj.tft.drawString(String("CAM ") + camera, 2, 20, 1);
@@ -878,14 +896,23 @@ void run(bool fromSerial) {
   uint32_t nextChannelHop = millis() + CHANNEL_DWELL_MS;
   uint32_t nextCamSerial = 0;
   scanChannel = 1;
+  #ifdef SINGLE_BUTTON_NAV
+    NyanBoxInput::SingleButton sbState;   // BOOT: tap=next, hold=exit
+  #endif
   if (fromSerial) while (Serial.available()) Serial.read();
 
   if (error != ESP_OK)
     showError("Passive Wi-Fi scan could not start.");
 
   while (true) {
-    if (c_btn.justPressed())
-      break;
+    #ifdef SINGLE_BUTTON_NAV
+      const NyanBoxInput::Event sbEv = NyanBoxInput::poll(c_btn, sbState);
+      if (sbEv == NyanBoxInput::HOLD)      // hold BOOT = exit
+        break;
+    #else
+      if (c_btn.justPressed())
+        break;
+    #endif
     if (fromSerial && Serial.available()) {  // web "Stop"/stopscan ends the tool
       while (Serial.available()) Serial.read();
       break;
@@ -910,6 +937,14 @@ void run(bool fromSerial) {
       selected = count - 1;
 
     bool redraw = revision != drawnRevision;
+    #ifdef SINGLE_BUTTON_NAV
+      // One BOOT button: tap cycles the live list (wrapping). No detail view
+      // (needs L/R); hold exits (handled at the top of the loop).
+      if (sbEv == NyanBoxInput::TAP && count > 0) {
+        selected = (selected + 1) % count;
+        redraw = true;
+      }
+    #else
     if (u_btn.justPressed() && selected > 0) {
       selected--;
       redraw = true;
@@ -926,6 +961,7 @@ void run(bool fromSerial) {
       detailView = false;
       redraw = true;
     }
+    #endif
     if (static_cast<int32_t>(millis() - nextRefresh) >= 0) {
       nextRefresh = millis() + (detailView ? 1000 : CHANNEL_DWELL_MS);
       redraw = true;
@@ -988,12 +1024,22 @@ bool selectDeauthTarget(DeauthTarget& target) {
   uint32_t nextChannelHop = millis() + CHANNEL_DWELL_MS;
   scanChannel = 1;
   bool accepted = false;
+  #ifdef SINGLE_BUTTON_NAV
+    NyanBoxInput::SingleButton sbState;   // BOOT: tap=cycle, hold=confirm/advance
+  #endif
 
   if (error != ESP_OK)
     showError("Passive camera scan could not start.");
 
   while (true) {
+    #ifdef SINGLE_BUTTON_NAV
+      const NyanBoxInput::Event sbEv = NyanBoxInput::poll(c_btn, sbState);
+    #endif
     if (confirming) {
+      #ifdef SINGLE_BUTTON_NAV
+        if (sbEv == NyanBoxInput::HOLD) { accepted = true; break; }  // hold = FIRE
+        else if (sbEv == NyanBoxInput::TAP) break;                   // tap  = cancel
+      #else
       if (l_btn.justPressed()) {
         confirming = false;
         preflighting = true;
@@ -1004,11 +1050,23 @@ bool selectDeauthTarget(DeauthTarget& target) {
         accepted = true;
         break;
       }
+      #endif
       delay(5);
       continue;
     }
 
     if (preflighting) {
+      #ifdef SINGLE_BUTTON_NAV
+        if (sbEv == NyanBoxInput::TAP && target.count > 1) {      // tap = next target
+          preflightIndex = (preflightIndex + 1) % target.count;
+          drawDeauthPreflight(target, preflightIndex);
+        }
+        else if (sbEv == NyanBoxInput::HOLD) {                    // hold = continue
+          preflighting = false;
+          confirming = true;
+          drawDeauthConfirm(target);
+        }
+      #else
       const bool upPressed = u_btn.justPressed();
       const bool downPressed = d_btn.justPressed();
       if (l_btn.justPressed()) {
@@ -1032,11 +1090,30 @@ bool selectDeauthTarget(DeauthTarget& target) {
         drawDeauthConfirm(target);
         releaseControls();
       }
+      #endif
       delay(5);
       continue;
     }
 
     if (choosingScope) {
+      #ifdef SINGLE_BUTTON_NAV
+        if (sbEv == NyanBoxInput::TAP) {                 // tap = next scope option
+          do {
+            scopeChoice = (scopeChoice + 1) % 3;
+          } while (scopeChoice == 1 && !brandAvailable);
+          drawDeauthScope(pending, brandPlan, scopeChoice, brandAvailable);
+        }
+        else if (sbEv == NyanBoxInput::HOLD) {           // hold = confirm scope
+          if (scopeChoice == 2)
+            buildApScopePlan(pending, target);
+          else
+            target = scopeChoice == 1 ? brandPlan : individualPlan;
+          choosingScope = false;
+          preflighting = true;
+          preflightIndex = 0;
+          drawDeauthPreflight(target, preflightIndex);
+        }
+      #else
       const bool upPressed = u_btn.justPressed();
       const bool downPressed = d_btn.justPressed();
       if (l_btn.justPressed()) {
@@ -1063,12 +1140,15 @@ bool selectDeauthTarget(DeauthTarget& target) {
         drawDeauthPreflight(target, preflightIndex);
         releaseControls();
       }
+      #endif
       delay(5);
       continue;
     }
 
+    #ifndef SINGLE_BUTTON_NAV
     if (c_btn.justPressed())
       break;
+    #endif
 
     if (error == ESP_OK &&
         static_cast<int32_t>(millis() - nextChannelHop) >= 0) {
@@ -1089,15 +1169,28 @@ bool selectDeauthTarget(DeauthTarget& target) {
       selected = count - 1;
 
     bool redraw = revision != drawnRevision;
-    if (u_btn.justPressed() && selected > 0) {
-      selected--;
-      redraw = true;
-    }
-    if (d_btn.justPressed() && selected + 1 < count) {
-      selected++;
-      redraw = true;
-    }
-    if (r_btn.justPressed() && count > 0) {
+    #ifdef SINGLE_BUTTON_NAV
+      // tap = next camera (wrap); hold = select highlighted camera, or exit the
+      // picker if no camera has been detected yet.
+      if (sbEv == NyanBoxInput::TAP && count > 0) {
+        selected = (selected + 1) % count;
+        redraw = true;
+      }
+      if (sbEv == NyanBoxInput::HOLD && count == 0)
+        break;                       // nothing to target -> leave
+      const bool doSelect = (sbEv == NyanBoxInput::HOLD) && count > 0;
+    #else
+      if (u_btn.justPressed() && selected > 0) {
+        selected--;
+        redraw = true;
+      }
+      if (d_btn.justPressed() && selected + 1 < count) {
+        selected++;
+        redraw = true;
+      }
+      const bool doSelect = r_btn.justPressed() && count > 0;
+    #endif
+    if (doSelect) {
       if (uiSnapshot[selected].hasBssid && uiSnapshot[selected].channel >= 1 &&
           uiSnapshot[selected].channel <= 14) {
         pending = uiSnapshot[selected];
@@ -1111,7 +1204,9 @@ bool selectDeauthTarget(DeauthTarget& target) {
         scopeChoice = 0;
         choosingScope = true;
         drawDeauthScope(pending, brandPlan, scopeChoice, brandAvailable);
-        releaseControls();
+        #ifndef SINGLE_BUTTON_NAV
+          releaseControls();
+        #endif
       }
       else {
         showError("No AP link observed yet. Generate camera traffic and retry.");

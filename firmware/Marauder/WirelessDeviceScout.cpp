@@ -9,12 +9,15 @@
 
 #include "configs.h"
 
-// Enabled on the Mini V3 (physical D-pad) or any touch board (Marauder V8),
-// where u_btn..c_btn come from EternalTouchButtons.cpp as touch zones.
+// Enabled on the Mini V3 (physical D-pad), any touch board (Marauder V8, where
+// u_btn..c_btn come from EternalTouchButtons.cpp as touch zones), or a
+// single-button board (LilyGo T-Dongle C5: BOOT button only, SINGLE_BUTTON_NAV
+// -- tap to scroll, hold to exit).
 #if defined(HAS_BT) && defined(HAS_NIMBLE_2) && defined(HAS_SCREEN) && ( \
       (defined(HAS_BUTTONS) && (U_BTN >= 0) && (D_BTN >= 0) && \
        (L_BTN >= 0) && (R_BTN >= 0) && (C_BTN >= 0)) \
-      || defined(HAS_TOUCH) )
+      || defined(HAS_TOUCH) \
+      || (defined(SINGLE_BUTTON_NAV) && (C_BTN >= 0)) )
 
 #include <NimBLEDevice.h>
 #include <WiFi.h>
@@ -25,6 +28,7 @@
 
 #include "Display.h"
 #include "Switches.h"
+#include "NyanBoxInput.h"   // single-button nav + rotation-aware screen metrics
 
 extern Display display_obj;
 extern Switches u_btn;
@@ -37,7 +41,11 @@ namespace WirelessDeviceScout {
 namespace {
 
 constexpr uint8_t MAX_RESULTS = 48;
+#ifdef SINGLE_BUTTON_NAV
+constexpr uint8_t VISIBLE_ROWS = 3;   // short 160x80 dongle panel fits ~3 rows
+#else
 constexpr uint8_t VISIBLE_ROWS = 6;
+#endif
 constexpr uint16_t CHANNEL_DWELL_MS = 350;
 constexpr uint16_t PERSISTENCE_WINDOW_MS = 5000;
 constexpr int16_t ROW_START_Y = 29;
@@ -102,11 +110,15 @@ void releaseButton(Switches& button) {
 }
 
 void releaseControls() {
+#ifdef SINGLE_BUTTON_NAV
+  releaseButton(c_btn);           // only the BOOT button exists on the dongle
+#else
   releaseButton(u_btn);
   releaseButton(d_btn);
   releaseButton(l_btn);
   releaseButton(r_btn);
   releaseButton(c_btn);
+#endif
 }
 
 void formatAddress(const uint8_t* address, char* output, size_t outputSize) {
@@ -260,11 +272,11 @@ void resetResults() {
 }
 
 void drawHeader() {
-  display_obj.tft.fillRect(0, 0, TFT_WIDTH, 16, TFT_NAVY);
+  display_obj.tft.fillRect(0, 0, nbScreenW(), 16, TFT_NAVY);
   display_obj.tft.setTextDatum(TC_DATUM);
   display_obj.tft.setTextSize(1);
   display_obj.tft.setTextColor(TFT_CYAN, TFT_NAVY);
-  display_obj.tft.drawString("DEVICE SCOUT", TFT_WIDTH / 2, 4, 1);
+  display_obj.tft.drawString("DEVICE SCOUT", nbScreenW() / 2, 4, 1);
   display_obj.tft.setTextDatum(TL_DATUM);
 }
 
@@ -276,7 +288,11 @@ void drawList(uint8_t selected) {
   drawHeader();
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
   display_obj.tft.setCursor(2, 18);
-  display_obj.tft.printf("Found:%u Ch:%u R:detail", count, scanChannel);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.printf("Found:%u Ch:%u", count, scanChannel);
+  #else
+    display_obj.tft.printf("Found:%u Ch:%u R:detail", count, scanChannel);
+  #endif
   uint8_t start = selected >= VISIBLE_ROWS ? selected - VISIBLE_ROWS + 1 : 0;
   for (uint8_t row = 0; row < VISIBLE_ROWS; row++) {
     const uint8_t index = start + row;
@@ -286,17 +302,21 @@ void drawList(uint8_t selected) {
     const bool highlighted = index == selected;
     const uint16_t background = highlighted ? TFT_CYAN : TFT_BLACK;
     const uint16_t foreground = highlighted ? TFT_BLACK : TFT_CYAN;
-    display_obj.tft.fillRect(0, y, TFT_WIDTH, ROW_HEIGHT - 1, background);
+    display_obj.tft.fillRect(0, y, nbScreenW(), ROW_HEIGHT - 1, background);
     display_obj.tft.setTextColor(foreground, background);
-    display_obj.tft.setViewport(2, y, TFT_WIDTH - 4, ROW_HEIGHT - 1);
+    display_obj.tft.setViewport(2, y, nbScreenW() - 4, ROW_HEIGHT - 1);
     display_obj.tft.setCursor(0, 2);
     display_obj.tft.printf("%c %d %s", snapshot[index].kind == BLE_DEVICE ? 'B' : 'W',
                            snapshot[index].rssi, snapshot[index].name);
     display_obj.tft.resetViewport();
   }
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
-  display_obj.tft.print(F("Persistence-ranked  C:exit"));
+  display_obj.tft.setCursor(2, nbScreenH() - 9);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.print(F("Tap:next  Hold:exit"));
+  #else
+    display_obj.tft.print(F("Persistence-ranked  C:exit"));
+  #endif
 }
 
 // Locate the locked device by ADDRESS (not list position): the list is
@@ -411,6 +431,9 @@ void run(bool fromSerial) {
 
   uint8_t selected = 0;
   uint8_t detailPage = 0;
+  #ifdef SINGLE_BUTTON_NAV
+    NyanBoxInput::SingleButton sbState;   // BOOT button: tap=next, hold=exit
+  #endif
   char lockedAddress[18] = {0};   // device the detail/locate view is pinned to
   DeviceKind lockedKind = BLE_DEVICE;
   uint32_t drawnRevision = UINT32_MAX;
@@ -420,8 +443,14 @@ void run(bool fromSerial) {
   uint32_t nextScoutSerial = 0;
   if (fromSerial) while (Serial.available()) Serial.read();
   while (true) {
-    if (c_btn.justPressed())
-      break;
+    #ifdef SINGLE_BUTTON_NAV
+      const NyanBoxInput::Event sbEv = NyanBoxInput::poll(c_btn, sbState);
+      if (sbEv == NyanBoxInput::HOLD)       // hold BOOT = exit
+        break;
+    #else
+      if (c_btn.justPressed())
+        break;
+    #endif
     if (fromSerial && Serial.available()) {  // web "Stop"/stopscan ends the tool
       while (Serial.available()) Serial.read();
       break;
@@ -451,6 +480,14 @@ void run(bool fromSerial) {
     // pinned to one device, so don't repaint it on every advert (that was the
     // rapid flicker) -- it refreshes on its own timer and on button presses.
     bool redraw = (detailPage == 0) && (revision != drawnRevision);
+    #ifdef SINGLE_BUTTON_NAV
+      // One BOOT button: tap cycles the highlight through the live list
+      // (wrapping), hold exits (handled at the top of the loop). No detail view.
+      if (sbEv == NyanBoxInput::TAP && count) {
+        selected = (selected + 1) % count;
+        redraw = true;
+      }
+    #else
     if (detailPage == 0 && u_btn.justPressed() && selected > 0) {
       selected--;
       redraw = true;
@@ -481,6 +518,7 @@ void run(bool fromSerial) {
       lockedAddress[0] = '\0';
       redraw = true;
     }
+    #endif
     if (static_cast<int32_t>(now - nextDraw) >= 0) {
       nextDraw = now + (detailPage ? 500 : 350);
       redraw = true;

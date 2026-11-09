@@ -18,7 +18,8 @@
 #if defined(HAS_BT) && defined(HAS_NIMBLE_2) && defined(HAS_SCREEN) && ( \
       (defined(HAS_BUTTONS) && (U_BTN >= 0) && (D_BTN >= 0) && \
        (L_BTN >= 0) && (R_BTN >= 0) && (C_BTN >= 0)) \
-      || defined(HAS_TOUCH) )
+      || defined(HAS_TOUCH) \
+      || (defined(SINGLE_BUTTON_NAV) && (C_BTN >= 0)) )
 
 #include <NimBLEDevice.h>
 #include <WiFi.h>
@@ -26,6 +27,7 @@
 
 #include "Display.h"
 #include "Switches.h"
+#include "NyanBoxInput.h"   // single-button nav + rotation-aware screen metrics
 
 extern Display display_obj;
 extern Switches u_btn;
@@ -84,11 +86,15 @@ void releaseButton(Switches& button) {
 }
 
 void releaseControls() {
+#ifdef SINGLE_BUTTON_NAV
+  releaseButton(c_btn);           // only the BOOT button exists on the dongle
+#else
   releaseButton(u_btn);
   releaseButton(d_btn);
   releaseButton(l_btn);
   releaseButton(r_btn);
   releaseButton(c_btn);
+#endif
 }
 
 void wifiCallback(void* buffer, wifi_promiscuous_pkt_type_t type) {
@@ -150,11 +156,11 @@ void resetCounters() {
 }
 
 void drawHeader(const char* title, uint16_t color) {
-  display_obj.tft.fillRect(0, 0, TFT_WIDTH, 16, TFT_NAVY);
+  display_obj.tft.fillRect(0, 0, nbScreenW(), 16, TFT_NAVY);
   display_obj.tft.setTextDatum(TC_DATUM);
   display_obj.tft.setTextSize(1);
   display_obj.tft.setTextColor(color, TFT_NAVY);
-  display_obj.tft.drawString(title, TFT_WIDTH / 2, 4, 1);
+  display_obj.tft.drawString(title, nbScreenW() / 2, 4, 1);
   display_obj.tft.setTextDatum(TL_DATUM);
 }
 
@@ -187,7 +193,11 @@ void drawScanner(const ChannelSample samples[CHANNEL_COUNT], uint32_t bleRate) {
   if (current.noiseFloor > -127)
     display_obj.tft.printf("N:%ddBm  Center:exit", current.noiseFloor);
   else
-    display_obj.tft.print(F("Decoded frames  C:exit"));
+    #ifdef SINGLE_BUTTON_NAV
+      display_obj.tft.print(F("Decoded frames  Hold:exit"));
+    #else
+      display_obj.tft.print(F("Decoded frames  C:exit"));
+    #endif
 }
 
 void drawBaseline(uint8_t sweeps, uint32_t elapsed) {
@@ -197,8 +207,8 @@ void drawBaseline(uint8_t sweeps, uint32_t elapsed) {
   display_obj.tft.drawString("Measuring baseline", 4, 25, 1);
   const uint8_t progress = min<uint32_t>(100,
       (elapsed * 100) / (CHANNEL_COUNT * CHANNEL_DWELL_MS * BASELINE_SWEEPS));
-  display_obj.tft.drawRect(4, 47, TFT_WIDTH - 8, 13, TFT_DARKGREY);
-  display_obj.tft.fillRect(6, 49, (TFT_WIDTH - 12) * progress / 100, 9,
+  display_obj.tft.drawRect(4, 47, nbScreenW() - 8, 13, TFT_DARKGREY);
+  display_obj.tft.fillRect(6, 49, (nbScreenW() - 12) * progress / 100, 9,
                            TFT_CYAN);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
   display_obj.tft.drawString(String(progress) + "%  sweep " +
@@ -208,7 +218,7 @@ void drawBaseline(uint8_t sweeps, uint32_t elapsed) {
   display_obj.tft.print(F("Keep the local radio environment steady."));
   display_obj.tft.setTextWrap(false);
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
+  display_obj.tft.setCursor(2, nbScreenH() - 9);
   display_obj.tft.print(F("Center: exit"));
 }
 
@@ -242,7 +252,7 @@ void drawDetector(const ChannelSample samples[CHANNEL_COUNT],
   display_obj.tft.setTextDatum(TC_DATUM);
   display_obj.tft.setTextColor(alert ? TFT_RED : TFT_GREEN, TFT_BLACK);
   display_obj.tft.setTextSize(2);
-  display_obj.tft.drawString(alert ? "ANOMALY" : "NORMAL", TFT_WIDTH / 2, 22, 1);
+  display_obj.tft.drawString(alert ? "ANOMALY" : "NORMAL", nbScreenW() / 2, 22, 1);
   display_obj.tft.setTextSize(1);
   display_obj.tft.setTextDatum(TL_DATUM);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -258,8 +268,12 @@ void drawDetector(const ChannelSample samples[CHANNEL_COUNT],
        (bleAlert ? "BLE activity saturation" : "No baseline deviation"));
   display_obj.tft.drawString(reason, 4, 91, 1);
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
-  display_obj.tft.print(F("R:recalibrate C:exit"));
+  display_obj.tft.setCursor(2, nbScreenH() - 9);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.print(F("Tap:recal  Hold:exit"));
+  #else
+    display_obj.tft.print(F("R:recalibrate C:exit"));
+  #endif
 }
 
 void showError(const char* message) {
@@ -271,7 +285,7 @@ void showError(const char* message) {
   display_obj.tft.print(message);
   display_obj.tft.setTextWrap(false);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  display_obj.tft.setCursor(4, TFT_HEIGHT - 12);
+  display_obj.tft.setCursor(4, nbScreenH() - 12);
   display_obj.tft.print(F("Center: exit"));
 }
 
@@ -335,14 +349,27 @@ void runTool(bool detector, bool fromSerial) {
   uint16_t graceDwells = 0;
 
   uint32_t nextSerial = 0;
+  #ifdef SINGLE_BUTTON_NAV
+    NyanBoxInput::SingleButton sbState;   // BOOT: tap=recalibrate, hold=exit
+  #endif
   while (true) {
-    if (c_btn.justPressed())
-      break;
+    #ifdef SINGLE_BUTTON_NAV
+      const NyanBoxInput::Event sbEv = NyanBoxInput::poll(c_btn, sbState);
+      if (sbEv == NyanBoxInput::HOLD)      // hold BOOT = exit
+        break;
+    #else
+      if (c_btn.justPressed())
+        break;
+    #endif
     if (fromSerial && Serial.available()) {  // web "Stop"/stopscan ends the tool
       while (Serial.available()) Serial.read();
       break;
     }
+    #ifdef SINGLE_BUTTON_NAV
+    if (detector && baselineReady && sbEv == NyanBoxInput::TAP) {   // tap = recalibrate
+    #else
     if (detector && baselineReady && r_btn.justPressed()) {
+    #endif
       memset(samples, 0, sizeof(samples));
       memset(baselineFrameSums, 0, sizeof(baselineFrameSums));
       memset(baselineNoiseSums, 0, sizeof(baselineNoiseSums));

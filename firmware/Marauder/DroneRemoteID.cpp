@@ -21,7 +21,8 @@
 #if defined(HAS_BT) && defined(HAS_NIMBLE_2) && defined(HAS_SCREEN) && ( \
       (defined(HAS_BUTTONS) && (U_BTN >= 0) && (D_BTN >= 0) && \
        (L_BTN >= 0) && (R_BTN >= 0) && (C_BTN >= 0)) \
-      || defined(HAS_TOUCH) )
+      || defined(HAS_TOUCH) \
+      || (defined(SINGLE_BUTTON_NAV) && (C_BTN >= 0)) )
 
 #include <NimBLEDevice.h>
 #include <WiFi.h>
@@ -33,6 +34,7 @@
 
 #include "Display.h"
 #include "Switches.h"
+#include "NyanBoxInput.h"   // single-button nav + rotation-aware screen metrics
 #include "GpsInterface.h"
 #include "StoragePaths.h"
 #include <SD.h>
@@ -53,7 +55,11 @@ namespace DroneRemoteID {
 namespace {
 
 constexpr uint8_t MAX_RESULTS = 16;
+#ifdef SINGLE_BUTTON_NAV
+constexpr uint8_t VISIBLE_ROWS = 3;   // short 160x80 dongle panel fits ~3 rows
+#else
 constexpr uint8_t VISIBLE_ROWS = 6;
+#endif
 constexpr uint8_t ODID_MESSAGE_SIZE = 25;
 constexpr uint16_t CHANNEL_DWELL_MS = 350;
 constexpr int16_t HEADER_HEIGHT = 16;
@@ -132,11 +138,15 @@ void releaseButton(Switches& button) {
 }
 
 void releaseControls() {
+#ifdef SINGLE_BUTTON_NAV
+  releaseButton(c_btn);           // only the BOOT button exists on the dongle
+#else
   releaseButton(u_btn);
   releaseButton(d_btn);
   releaseButton(l_btn);
   releaseButton(r_btn);
   releaseButton(c_btn);
+#endif
 }
 
 void resetResults() {
@@ -337,11 +347,11 @@ String methodName(uint8_t methods) {
 
 template <typename Canvas>
 void drawHeaderTo(Canvas& canvas, bool preview = false) {
-  canvas.fillRect(0, 0, TFT_WIDTH, HEADER_HEIGHT, TFT_NAVY);
+  canvas.fillRect(0, 0, nbScreenW(), HEADER_HEIGHT, TFT_NAVY);
   canvas.setTextDatum(TC_DATUM);
   canvas.setTextSize(1);
   canvas.setTextColor(TFT_CYAN, TFT_NAVY);
-  canvas.drawString(preview ? "TEST REMOTE ID" : "DRONE REMOTE ID", TFT_WIDTH / 2, 4, 1);
+  canvas.drawString(preview ? "TEST REMOTE ID" : "DRONE REMOTE ID", nbScreenW() / 2, 4, 1);
   canvas.setTextDatum(TL_DATUM);
 }
 
@@ -354,7 +364,11 @@ void drawList(uint8_t selected) {
   drawHeader();
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
   display_obj.tft.setCursor(2, 18);
-  display_obj.tft.printf("Found:%u Ch:%u R:detail", count, scanChannel);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.printf("Found:%u Ch:%u", count, scanChannel);
+  #else
+    display_obj.tft.printf("Found:%u Ch:%u R:detail", count, scanChannel);
+  #endif
 
   uint8_t start = 0;
   if (selected >= VISIBLE_ROWS)
@@ -366,17 +380,21 @@ void drawList(uint8_t selected) {
     const bool highlighted = index == selected;
     const uint16_t background = highlighted ? TFT_CYAN : TFT_BLACK;
     const uint16_t foreground = highlighted ? TFT_BLACK : TFT_CYAN;
-    display_obj.tft.fillRect(0, y, TFT_WIDTH, ROW_HEIGHT - 1, background);
+    display_obj.tft.fillRect(0, y, nbScreenW(), ROW_HEIGHT - 1, background);
     display_obj.tft.setTextColor(foreground, background);
-    display_obj.tft.setViewport(2, y, TFT_WIDTH - 4, ROW_HEIGHT - 1);
+    display_obj.tft.setViewport(2, y, nbScreenW() - 4, ROW_HEIGHT - 1);
     display_obj.tft.setCursor(0, 2);
     display_obj.tft.printf("%c %d %s", snapshot[index].lost ? 'L' : 'A', snapshot[index].rssi,
                            snapshot[index].id);
     display_obj.tft.resetViewport();
   }
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
-  display_obj.tft.print(F("Center: exit"));
+  display_obj.tft.setCursor(2, nbScreenH() - 9);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.print(F("Tap:next  Hold:exit"));
+  #else
+    display_obj.tft.print(F("Center: exit"));
+  #endif
 }
 
 template <typename Canvas>
@@ -422,7 +440,7 @@ void drawDetailTo(Canvas& canvas, const Drone& drone, uint8_t page, bool preview
     canvas.setTextColor(TFT_YELLOW, TFT_BLACK);
     canvas.drawString("Operator", 2, 20, 1);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
-    canvas.setViewport(2, 34, TFT_WIDTH - 4, 13);
+    canvas.setViewport(2, 34, nbScreenW() - 4, 13);
     canvas.setCursor(0, 2);
     canvas.print(drone.operatorId[0] ? drone.operatorId : "ID not observed");
     canvas.resetViewport();
@@ -485,16 +503,16 @@ void drawDetailTo(Canvas& canvas, const Drone& drone, uint8_t page, bool preview
       double radius = 50;
       for (unsigned i = 0; i < drone.historyCount; ++i)
         radius = std::max(radius, drone_tracking::distanceMeters(lat, lon, drone.history[i].latitudeE7 / 1e7, drone.history[i].longitudeE7 / 1e7) * 1.15);
-      const int cx = TFT_WIDTH / 2, cy = 71;
-      canvas.drawRect(3, 33, TFT_WIDTH - 6, 76, TFT_DARKGREY);
+      const int cx = nbScreenW() / 2, cy = 71;
+      canvas.drawRect(3, 33, nbScreenW() - 6, 76, TFT_DARKGREY);
       canvas.drawLine(cx, 33, cx, 108, TFT_DARKGREY);
-      canvas.drawLine(3, cy, TFT_WIDTH - 4, cy, TFT_DARKGREY);
+      canvas.drawLine(3, cy, nbScreenW() - 4, cy, TFT_DARKGREY);
       int previousX = cx, previousY = cy;
       for (unsigned i = 0; i < drone.historyCount; ++i) {
         const double pointLat = drone.history[i].latitudeE7 / 1e7, pointLon = drone.history[i].longitudeE7 / 1e7;
         const double bearing = drone_tracking::bearingDegrees(lat, lon, pointLat, pointLon) * .017453292519943295;
         const double ratio = drone_tracking::distanceMeters(lat, lon, pointLat, pointLon) / radius;
-        const int x = cx + int(sin(bearing) * ratio * (TFT_WIDTH / 2 - 7));
+        const int x = cx + int(sin(bearing) * ratio * (nbScreenW() / 2 - 7));
         const int y = cy - int(cos(bearing) * ratio * 34);
         if (i && uint32_t(drone.history[i].observedMs - drone.history[i - 1].observedMs) < drone_tracking::kLostMs)
           canvas.drawLine(previousX, previousY, x, y, TFT_CYAN);
@@ -507,7 +525,7 @@ void drawDetailTo(Canvas& canvas, const Drone& drone, uint8_t page, bool preview
   }
 
   canvas.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  canvas.setCursor(2, TFT_HEIGHT - 9);
+  canvas.setCursor(2, nbScreenH() - 9);
   canvas.print(F("L:list R:next C:exit"));
 }
 
@@ -526,7 +544,7 @@ void showError(const char* message) {
   display_obj.tft.print(message);
   display_obj.tft.setTextWrap(false);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  display_obj.tft.setCursor(4, TFT_HEIGHT - 12);
+  display_obj.tft.setCursor(4, nbScreenH() - 12);
   display_obj.tft.print(F("Center: exit"));
 }
 
@@ -628,7 +646,11 @@ void encodeOperatorId(uint8_t* m, const SpoofFields& f) {
 bool loadSpoofFromFile(const char* path, CapturedDrone& target) {
   #ifdef HAS_SD
   auto waitAck = []() {
+  #ifdef SINGLE_BUTTON_NAV
+    while (!c_btn.justPressed()) delay(5);   // tap BOOT to dismiss
+  #else
     while (!c_btn.justPressed() && !l_btn.justPressed()) delay(5);
+  #endif
     releaseControls();
   };
   if (!path || !SD.exists(path)) {
@@ -714,15 +736,31 @@ bool selectCapturedForSpoof(CapturedDrone& target) {
   const uint8_t count = copyResults(snapshot);
   if (count == 0) {
     showError("No captured drones. Run Drone Remote ID first.");
-    while (!c_btn.justPressed() && !l_btn.justPressed())
-      delay(5);
+    #ifdef SINGLE_BUTTON_NAV
+      while (!c_btn.justPressed()) delay(5);
+    #else
+      while (!c_btn.justPressed() && !l_btn.justPressed())
+        delay(5);
+    #endif
     releaseControls();
     return false;
   }
 
   uint8_t selected = 0;
   bool redraw = true;
+  #ifdef SINGLE_BUTTON_NAV
+    NyanBoxInput::SingleButton sbState;   // BOOT: tap=next drone, hold=select
+  #endif
   while (true) {
+    #ifdef SINGLE_BUTTON_NAV
+      const NyanBoxInput::Event sbEv = NyanBoxInput::poll(c_btn, sbState);
+      if (sbEv == NyanBoxInput::TAP) {
+        selected = (selected + 1) % count;   // tap = next drone (wrap)
+        redraw = true;
+      }
+      if (sbEv == NyanBoxInput::HOLD) {       // hold = select this drone
+        const Drone& source = snapshot[selected];
+    #else
     if (l_btn.justPressed()) {
       releaseControls();
       return false;
@@ -737,6 +775,7 @@ bool selectCapturedForSpoof(CapturedDrone& target) {
     }
     if (c_btn.justPressed()) {
       const Drone& source = snapshot[selected];
+    #endif
       memset(&target, 0, sizeof(target));
       strlcpy(target.address, source.address, sizeof(target.address));
       strlcpy(target.id, source.id, sizeof(target.id));
@@ -752,11 +791,11 @@ bool selectCapturedForSpoof(CapturedDrone& target) {
 
     if (redraw) {
       display_obj.tft.fillScreen(TFT_BLACK);
-      display_obj.tft.fillRect(0, 0, TFT_WIDTH, HEADER_HEIGHT, TFT_NAVY);
+      display_obj.tft.fillRect(0, 0, nbScreenW(), HEADER_HEIGHT, TFT_NAVY);
       display_obj.tft.setTextDatum(TC_DATUM);
       display_obj.tft.setTextSize(1);
       display_obj.tft.setTextColor(TFT_ORANGE, TFT_NAVY);
-      display_obj.tft.drawString("SELECT DRONE TO SPOOF", TFT_WIDTH / 2, 4, 1);
+      display_obj.tft.drawString("SELECT DRONE TO SPOOF", nbScreenW() / 2, 4, 1);
       display_obj.tft.setTextDatum(TL_DATUM);
       display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
       display_obj.tft.setCursor(2, 18);
@@ -774,17 +813,21 @@ bool selectCapturedForSpoof(CapturedDrone& target) {
         const uint16_t foreground = highlighted ? TFT_BLACK : TFT_ORANGE;
         const char method = snapshot[index].methods == (METHOD_WIFI | METHOD_BLE) ?
             '+' : (snapshot[index].methods & METHOD_WIFI ? 'W' : 'B');
-        display_obj.tft.fillRect(0, y, TFT_WIDTH, ROW_HEIGHT - 1, background);
+        display_obj.tft.fillRect(0, y, nbScreenW(), ROW_HEIGHT - 1, background);
         display_obj.tft.setTextColor(foreground, background);
-        display_obj.tft.setViewport(2, y, TFT_WIDTH - 4, ROW_HEIGHT - 1);
+        display_obj.tft.setViewport(2, y, nbScreenW() - 4, ROW_HEIGHT - 1);
         display_obj.tft.setCursor(0, 2);
         display_obj.tft.printf("%c %d %s", method, snapshot[index].rssi,
                                snapshot[index].id);
         display_obj.tft.resetViewport();
       }
       display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-      display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
-      display_obj.tft.print(F("C:select  L:cancel"));
+      display_obj.tft.setCursor(2, nbScreenH() - 9);
+      #ifdef SINGLE_BUTTON_NAV
+        display_obj.tft.print(F("Tap:next  Hold:pick"));
+      #else
+        display_obj.tft.print(F("C:select  L:cancel"));
+      #endif
       redraw = false;
     }
     delay(5);
@@ -846,6 +889,9 @@ void run(uint32_t durationMs) {
   uint8_t selected = 0;
   bool detailView = false;
   uint8_t detailPage = 0;
+  #ifdef SINGLE_BUTTON_NAV
+    NyanBoxInput::SingleButton sbState;   // BOOT: tap=next, hold=exit
+  #endif
   uint32_t drawnRevision = UINT32_MAX;
   uint32_t nextRefresh = 0;
   uint32_t nextChannelHop = millis() + CHANNEL_DWELL_MS;
@@ -857,7 +903,13 @@ void run(uint32_t durationMs) {
   while (true) {
     gps_obj.main();
     const uint32_t now = millis();
-    if (c_btn.justPressed() || (durationMs && uint32_t(now - startedMs) >= durationMs)) break;
+    #ifdef SINGLE_BUTTON_NAV
+      const NyanBoxInput::Event sbEv = NyanBoxInput::poll(c_btn, sbState);
+      if (sbEv == NyanBoxInput::HOLD ||                 // hold BOOT = exit
+          (durationMs && uint32_t(now - startedMs) >= durationMs)) break;
+    #else
+      if (c_btn.justPressed() || (durationMs && uint32_t(now - startedMs) >= durationMs)) break;
+    #endif
     portENTER_CRITICAL(&resultMux);
     for (unsigned i = 0; i < resultCount; ++i) drone_tracking::lifecycle(results[i], now);
     portEXIT_CRITICAL(&resultMux);
@@ -900,6 +952,14 @@ void run(uint32_t durationMs) {
       portEXIT_CRITICAL(&resultMux);
     }
     bool redraw = revision != drawnRevision;
+    #ifdef SINGLE_BUTTON_NAV
+      // One BOOT button: tap cycles the live drone list (wrapping). Hold exits
+      // (handled at the top of the loop). No detail view (that needs R/L).
+      if (sbEv == NyanBoxInput::TAP && count > 0) {
+        selected = (selected + 1) % count;
+        redraw = true;
+      }
+    #else
     if (!detailView && u_btn.justPressed() && selected > 0) {
       selected--;
       redraw = true;
@@ -930,6 +990,7 @@ void run(uint32_t durationMs) {
       portEXIT_CRITICAL(&resultMux);
       redraw = true;
     }
+    #endif
     if (static_cast<int32_t>(millis() - nextRefresh) >= 0) {
       nextRefresh = millis() + (detailView ? 1000 : CHANNEL_DWELL_MS);
       redraw = true;
