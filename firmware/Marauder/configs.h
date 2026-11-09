@@ -621,6 +621,8 @@
     #define HAS_SCREEN
     #define HAS_MINI_SCREEN
     #define HAS_BUTTONS
+    // One BOOT button only: tap = next menu item, hold = select/run.
+    #define SINGLE_BUTTON_NAV
     // APA102 status LED DISABLED on purpose: on the T-Dongle C5 it is wired to
     // GPIO2 and GPIO6 -- which are the SD card's MOSI and SCK lines. Driving the
     // LED bit-bangs those pins into GPIO mode and leaves them there, so the next

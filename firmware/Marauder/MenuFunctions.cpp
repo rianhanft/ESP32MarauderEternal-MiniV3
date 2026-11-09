@@ -610,7 +610,24 @@ void MenuFunctions::main(uint32_t currentTime)
 
   #ifdef HAS_BUTTONS
 
-    #if (C_BTN >= 0) && !defined(MARAUDER_CARDPUTER) && !defined(MARAUDER_CARDPUTER_ADV)
+    #ifdef SINGLE_BUTTON_NAV
+      // Single BOOT-button navigation. justPressed() is what advances the
+      // Switches hold timer (and updates isHeld()); isPressedNow() gives the
+      // live state for release. We track one press span ourselves so a short
+      // tap advances the cursor and a hold selects -- without justReleased(),
+      // which would fight justPressed() over the shared `pressed` flag.
+      bool sb_tap = false, sb_select = false;
+      c_btn.justPressed();                        // drive the hold timer / isHeld()
+      if (c_btn.isPressedNow()) {
+        if (!this->sb_pressing) { this->sb_pressing = true; this->sb_hold_fired = false; }
+        if (c_btn.isHeld() && !this->sb_hold_fired) { sb_select = true; this->sb_hold_fired = true; }
+      } else if (this->sb_pressing) {
+        if (!this->sb_hold_fired) sb_tap = true;  // released before the hold -> tap
+        this->sb_pressing = false;
+        this->sb_hold_fired = false;
+      }
+      bool c_btn_press = sb_select;               // hold = select / run
+    #elif (C_BTN >= 0) && !defined(MARAUDER_CARDPUTER) && !defined(MARAUDER_CARDPUTER_ADV)
       bool c_btn_press = c_btn.justPressed();
     #elif defined(HAS_FACES_KEYBOARD)
       bool c_btn_press = ((wifi_scan_obj.currentScanMode == WIFI_SCAN_OFF) ||
@@ -1062,7 +1079,7 @@ void MenuFunctions::main(uint32_t currentTime)
         #endif
       #endif
 
-      #if (D_BTN >= 0 || defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV) || defined(HAS_FACES_KEYBOARD))
+      #if (D_BTN >= 0 || defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV) || defined(HAS_FACES_KEYBOARD) || defined(SINGLE_BUTTON_NAV))
       #if (D_BTN >= 0)
       const bool down_just_pressed = d_btn.justPressed();
       const bool down_is_pressed = d_btn.isPressedNow();
@@ -1072,14 +1089,21 @@ void MenuFunctions::main(uint32_t currentTime)
       #elif defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV)
       const bool down_just_pressed = this->isKeyPressed('.') || this->isKeyPressed('s') || this->isKeyPressed('S');
       const bool down_is_pressed = down_just_pressed;
+      #elif defined(SINGLE_BUTTON_NAV)
+      const bool down_just_pressed = sb_tap;     // BOOT tap = one step down
+      const bool down_is_pressed = false;
       #endif
       const bool down_menu_navigation_active =
           wifi_scan_obj.currentScanMode == WIFI_SCAN_OFF ||
           wifi_scan_obj.currentScanMode == WIFI_CONNECTED ||
           wifi_scan_obj.currentScanMode == OTA_UPDATE;
+      #ifdef SINGLE_BUTTON_NAV
+      const bool down_event = down_just_pressed;  // tap = single step, no auto-repeat
+      #else
       const bool down_event = down_menu_navigation_active
           ? menu_down_repeat.update(down_is_pressed, currentTime)
           : down_just_pressed;
+      #endif
       if (!down_menu_navigation_active) menu_down_repeat.reset();
       if (down_event) {
         if ((wifi_scan_obj.currentScanMode == WIFI_SCAN_OFF) ||

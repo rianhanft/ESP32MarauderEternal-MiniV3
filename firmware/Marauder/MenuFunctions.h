@@ -178,6 +178,10 @@ class MenuFunctions
     float _graph_scale = 1.0;
     uint32_t initTime = 0;
     int menu_start_index = 0;
+    // Single-button (BOOT) navigation state: tracks one press span so a short
+    // tap can advance the cursor and a hold can select, from one button.
+    bool sb_pressing = false;
+    bool sb_hold_fired = false;
     uint8_t mini_kb_index = 0;
     uint8_t old_gps_sat_count = 0;
     uint8_t max_graph_value = 0;

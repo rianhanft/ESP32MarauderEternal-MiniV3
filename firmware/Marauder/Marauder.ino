@@ -124,7 +124,11 @@ https://www.online-utility.org/image/convert/to/XBM
     Switches r_btn = Switches(R_BTN, 1000, R_PULL);
   #endif
   #if (C_BTN >= 0)
-    Switches c_btn = Switches(C_BTN, 1000, C_PULL);
+    #ifdef SINGLE_BUTTON_NAV
+      Switches c_btn = Switches(C_BTN, 500, C_PULL);   // 0.5s hold = select
+    #else
+      Switches c_btn = Switches(C_BTN, 1000, C_PULL);
+    #endif
   #endif
   #if defined(MARAUDER_POOM) && (B_BTN >= 0)
     Switches b_btn = Switches(B_BTN, 1000, B_PULL);
