@@ -1,4 +1,5 @@
 #include "EvilPortal.h"
+#include <esp_wifi.h>   // esp_wifi_set_band_mode() -- pin the portal AP to 2.4 GHz on the dual-band C5
 
 char apName[MAX_AP_NAME_SIZE] = "PORTAL";
 
@@ -168,6 +169,13 @@ void EvilPortal::cleanup() {
     // nothing after an Evil Portal"). Stock pairs this same call with the
     // esp_wifi_init(&cfg) in RunEvilPortal, so the next portal re-creates the AP
     // normally.
+    //
+    // Restore the default dual-band mode first (startAP() pinned the radio to
+    // 2.4 GHz only). Do it while the driver is still up -- before the AP teardown
+    // -- so a later 5 GHz scan isn't silently stuck on 2.4 GHz.
+    #if defined(SOC_WIFI_SUPPORT_5G) && SOC_WIFI_SUPPORT_5G
+      esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
+    #endif
     WiFi.softAPdisconnect(true);
   }
 
@@ -459,8 +467,20 @@ void EvilPortal::startAP() {
   bool up = false;
   for (int attempt = 0; attempt < 4; attempt++) {
     WiFi.mode(WIFI_AP);
+    // Dual-band ESP32-C5: the radio runs on only ONE band at a time, and the
+    // default band mode (AUTO = 2.4G + 5G) lets the softAP come up on a band/
+    // channel the phone never scans -- so the SSID "hosts" but never appears in
+    // the Wi-Fi list ("says hosting but doesn't pop up"). Pin the portal to
+    // 2.4 GHz, the band every phone scans and the one captive-portal detection
+    // expects. Must run AFTER WiFi.mode() has started the driver; the band mode
+    // can't be set before the driver is up.
+    #if defined(SOC_WIFI_SUPPORT_5G) && SOC_WIFI_SUPPORT_5G
+      esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY);
+    #endif
     WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
-    up = WiFi.softAP(apName);
+    // Explicit 2.4 GHz channel 1 -- don't rely on the core's default channel
+    // once the band is pinned.
+    up = WiFi.softAP(apName, NULL, 1);
     if (up && WiFi.softAPIP() != IPAddress(0, 0, 0, 0))
       break;
     // Failed to come up: drop the half-started AP and let the radio settle.
