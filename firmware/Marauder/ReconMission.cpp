@@ -527,7 +527,11 @@ void ReconMission::writeManifest(bool complete) {
 
 // GCOVR_EXCL_START -- Recon dashboard rendering requires a hardware TFT.
 #if defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV) || \
-    defined(MARAUDER_M5STACK_CORE2_AWS)
+    defined(MARAUDER_M5STACK_CORE2_AWS) || defined(MARAUDER_T_DONGLE_C5)
+  // Boards whose panel runs rotated: the active drawable area is SCREEN_WIDTH x
+  // SCREEN_HEIGHT, NOT the unrotated TFT_WIDTH x TFT_HEIGHT. On the T-Dongle C5
+  // those are swapped (TFT 80x160, rotated to 160x80), so using the raw TFT
+  // macros painted the whole recon dashboard into an 80px-wide strip.
   #define RECON_SCREEN_WIDTH SCREEN_WIDTH
   #define RECON_SCREEN_HEIGHT SCREEN_HEIGHT
 #else
@@ -612,6 +616,82 @@ void ReconMission::drawDashboard(uint32_t current_time) {
       display_obj.tft.drawString(compact_line, 0, 40, 1);
       display_obj.tft.drawFastHLine(0, 51, RECON_SCREEN_WIDTH, TFT_DARKGREY);
       display_obj.tft.drawString("B: stop", 0, 54, 1);
+      return;
+    #endif
+    #ifdef MARAUDER_T_DONGLE_C5
+      // Dedicated compact dashboard for the rotated 160x80 T-Dongle panel. The
+      // full dashboard assumes a tall screen and overflowed the short panel, so
+      // show the essentials on one screen below the status bar.
+      display_obj.tft.fillRect(0, STATUS_BAR_WIDTH, RECON_SCREEN_WIDTH,
+                               RECON_SCREEN_HEIGHT - STATUS_BAR_WIDTH, TFT_BLACK);
+      display_obj.tft.setFreeFont(NULL);
+      display_obj.tft.setTextSize(1);
+      display_obj.tft.setTextWrap(false);
+
+      char dline[26];
+      display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
+      if (active_mode == ReconMode::WIFI_RECON) {
+        snprintf(dline, sizeof(dline), "WiFi recon  %lu:%02lu",
+                 static_cast<unsigned long>(seconds / 60),
+                 static_cast<unsigned long>(seconds % 60));
+        display_obj.tft.drawString(dline, 2, 12, 1);
+        display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        snprintf(dline, sizeof(dline), "AP%lu  Sta%lu  Prb%lu",
+                 static_cast<unsigned long>(ap_count),
+                 static_cast<unsigned long>(station_count),
+                 static_cast<unsigned long>(probe_count));
+        display_obj.tft.drawString(dline, 2, 24, 1);
+        snprintf(dline, sizeof(dline), "Upd%lu  Deauth%lu",
+                 static_cast<unsigned long>(repeat_count),
+                 static_cast<unsigned long>(deauth_count));
+        display_obj.tft.drawString(dline, 2, 36, 1);
+      } else {
+        snprintf(dline, sizeof(dline), "BLE recon  %lu:%02lu",
+                 static_cast<unsigned long>(seconds / 60),
+                 static_cast<unsigned long>(seconds % 60));
+        display_obj.tft.drawString(dline, 2, 12, 1);
+        display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        snprintf(dline, sizeof(dline), "Devices %lu",
+                 static_cast<unsigned long>(ble_count));
+        display_obj.tft.drawString(dline, 2, 24, 1);
+        snprintf(dline, sizeof(dline), "Updates %lu",
+                 static_cast<unsigned long>(repeat_count));
+        display_obj.tft.drawString(dline, 2, 36, 1);
+      }
+
+      // Latest activity line.
+      {
+        const UiEvent& latest = ui_events[(ui_event_head + 3) % 4];
+        char ev[26];
+        if (active_mode == ReconMode::WIFI_RECON && ui_relationship_head) {
+          const UiRelationship& rel =
+              ui_relationships[(ui_relationship_head + 2) % 3];
+          char ap_name[12];
+          reconTruncate(rel.ap_name, ap_name, sizeof(ap_name));
+          snprintf(ev, sizeof(ev), "%02X:%02X > %s",
+                   rel.station[4], rel.station[5], ap_name);
+        } else if (latest.type == 'p') {
+          snprintf(ev, sizeof(ev), "PRB %.18s", latest.label);
+        } else if (latest.type == 'b') {
+          snprintf(ev, sizeof(ev), "%02X:%02X %.14s", latest.mac[4],
+                   latest.mac[5], latest.label[0] ? latest.label : "BLE");
+        } else if (latest.type) {
+          snprintf(ev, sizeof(ev), "%c %02X:%02X RSSI%d", latest.type,
+                   latest.mac[4], latest.mac[5], latest.rssi);
+        } else {
+          snprintf(ev, sizeof(ev), "Waiting for devices");
+        }
+        display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+        display_obj.tft.drawString(ev, 2, 48, 1);
+      }
+
+      snprintf(dline, sizeof(dline), "Churn +%u -%u", churn_in, churn_out);
+      display_obj.tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+      display_obj.tft.drawString(dline, 2, 60, 1);
+      display_obj.tft.drawFastHLine(0, RECON_SCREEN_HEIGHT - 10,
+                                    RECON_SCREEN_WIDTH, TFT_DARKGREY);
+      display_obj.tft.setTextColor(TFT_RED, TFT_BLACK);
+      display_obj.tft.drawString("Hold BOOT: stop", 2, RECON_SCREEN_HEIGHT - 9, 1);
       return;
     #endif
     bool gps_fix = false;
