@@ -923,6 +923,10 @@ void Display::buildBanner(String msg, int xpos)
 
   #if defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV)
     int banner_y = STATUS_BAR_WIDTH + 8;
+  #elif defined(MARAUDER_T_DONGLE_C5)
+    // Drop the title a couple px into the body so its top edge isn't flush
+    // against (and sliced by) the status bar on the short 160x80 panel.
+    int banner_y = STATUS_BAR_WIDTH + 2;
   #else
     int banner_y = STATUS_BAR_WIDTH;
   #endif

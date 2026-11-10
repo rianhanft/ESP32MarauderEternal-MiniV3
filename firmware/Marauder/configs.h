@@ -2522,7 +2522,7 @@
     // Keypad start position, key sizes and spacing for the 160x80 landscape
     // menu (SCREEN_WIDTH 160 / SCREEN_HEIGHT 80).
     #define KEY_X (SCREEN_WIDTH/2)   // centre of key (80)
-    #define KEY_Y 22                 // first row, just below the status bar
+    #define KEY_Y 26                 // first row, below the status bar + title banner
     #define KEY_W SCREEN_WIDTH       // full width (160)
     #define KEY_H 11                 // compact rows -> ~5 per page
     #define KEY_SPACING_X 0
