@@ -360,7 +360,7 @@ void remoteIdFormatTransports(uint8_t transportMask, char* output,
 float remoteIdGridScaleMeters(const RemoteIdRecord* records, size_t count,
                               int32_t originLatE7, int32_t originLonE7,
                               float minimumRadiusM) {
-  double farthest = minimumRadiusM;
+  double farthest = 0.0;
   for (size_t i = 0; i < count; ++i) {
     const RemoteIdRecord& record = records[i];
     if (record.hasLocation)
@@ -382,7 +382,20 @@ float remoteIdGridScaleMeters(const RemoteIdRecord* records, size_t count,
           originLatE7, originLonE7, record.operatorLatitudeE7,
           record.operatorLongitudeE7));
   }
-  return static_cast<float>(farthest * 1.15);
+
+  // Snap the radius UP to a stable "radar range" step instead of continuously
+  // fitting it to the lone drone. A scale that re-fits every frame keeps the
+  // drone at a near-constant fraction of the radius, so the dot never looks like
+  // it moves as you walk the spoofer around ("barely moves no matter where I
+  // go"). With a quantized scale the dot's distance from centre tracks the real
+  // range within a step, and the scale only jumps at a threshold.
+  const double needed = std::fmax(farthest * 1.15, static_cast<double>(minimumRadiusM));
+  static const double kSteps[] = {
+      25, 50, 100, 150, 250, 400, 600, 1000, 1500, 2500,
+      4000, 6000, 10000, 15000, 25000, 50000, 100000};
+  for (double step : kSteps)
+    if (needed <= step) return static_cast<float>(step);
+  return static_cast<float>(kSteps[sizeof(kSteps) / sizeof(kSteps[0]) - 1]);
 }
 
 RemoteIdGridPoint remoteIdProjectToGrid(int32_t pointLatE7, int32_t pointLonE7,

@@ -626,7 +626,16 @@ void WiFiScan::renderRemoteIdGlobal() {
           const int32_t originLat = gps_obj.getLatInt() * 10;
           const int32_t originLon = gps_obj.getLonInt() * 10;
           const float radius = remoteIdGridScaleMeters(remote_id_snapshots,
-              recordCount, originLat, originLon, 50.0f);
+              recordCount, originLat, originLon, 25.0f);
+          // Show the current range-ring radius so the operator can read the
+          // scale (edge of grid = this many metres from the green receiver dot).
+          display_obj.tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+          String scaleLabel = radius >= 1000.0f
+              ? String(radius / 1000.0f, 1) + "km"
+              : String((int)radius) + "m";
+          display_obj.tft.setCursor(SCREEN_WIDTH -
+              (scaleLabel.length() * 6) - 2, gridTop + 2);
+          display_obj.tft.print(scaleLabel);
           display_obj.tft.fillCircle(SCREEN_WIDTH / 2,
               gridTop + gridHeight / 2, 3, TFT_GREEN);
           for (size_t i = 0; i < recordCount; ++i) {
