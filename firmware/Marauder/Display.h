@@ -182,6 +182,10 @@ class Display
     void touchToExit();
     void twoPartDisplay(String center_text);
     void updateBanner(String msg);
+    // Top-of-screen scan/attack HUD title. Draws on every board EXCEPT the
+    // T-Dongle C5, whose 160x80 panel is too short for a y=16 font-2 header --
+    // there it is suppressed so it doesn't collide with / clip at the top.
+    void scanTitle(const String& title, int32_t x, int32_t y, uint8_t font);
     void setCalData(bool landscape = false);
 };
 #endif

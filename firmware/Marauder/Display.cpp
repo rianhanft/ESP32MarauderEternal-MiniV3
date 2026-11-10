@@ -916,6 +916,18 @@ void Display::updateBanner(String msg)
   this->buildBanner(msg, current_banner_pos);
 }
 
+void Display::scanTitle(const String& title, int32_t x, int32_t y, uint8_t font)
+{
+  // The T-Dongle C5's 160x80 panel has no room for the tall font-2 HUD title at
+  // the top of a running scan/attack -- it was clipped. Suppress it there; every
+  // other board draws it as before.
+  #ifndef MARAUDER_T_DONGLE_C5
+    this->tft.drawCentreString(title, x, y, font);
+  #else
+    (void)title; (void)x; (void)y; (void)font;
+  #endif
+}
+
 
 void Display::buildBanner(String msg, int xpos)
 {
