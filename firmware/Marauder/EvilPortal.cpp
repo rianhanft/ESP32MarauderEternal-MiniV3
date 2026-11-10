@@ -476,6 +476,11 @@ void EvilPortal::startAP() {
     // can't be set before the driver is up.
     #if defined(SOC_WIFI_SUPPORT_5G) && SOC_WIFI_SUPPORT_5G
       esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY);
+      // Force a legacy 2.4 GHz-compatible PHY on the AP interface. Allowed only
+      // when the band is NOT AUTO (which we just pinned to 2G), and it keeps the
+      // beacon on classic 11b/g/n that every phone scans.
+      esp_wifi_set_protocol(WIFI_IF_AP,
+          WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
     #endif
     WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
     // Explicit 2.4 GHz channel 1 -- don't rely on the core's default channel
@@ -487,6 +492,25 @@ void EvilPortal::startAP() {
     WiFi.softAPdisconnect(true);
     delay(200);
   }
+
+  // Diagnostics: what channel/band did the AP actually land on? Printed over the
+  // dongle's USB-CDC serial so we can tell a "wrong band" failure (5 GHz channel)
+  // from a "wrong SSID / not beaconing" one.
+  #ifndef MARAUDER_V8
+    {
+      uint8_t prim_chan = 0;
+      wifi_second_chan_t sec_chan = WIFI_SECOND_CHAN_NONE;
+      esp_wifi_get_channel(&prim_chan, &sec_chan);
+      int band_mode_val = -1;
+      #if defined(SOC_WIFI_SUPPORT_5G) && SOC_WIFI_SUPPORT_5G
+        wifi_band_mode_t bm = WIFI_BAND_MODE_AUTO;
+        if (esp_wifi_get_band_mode(&bm) == ESP_OK) band_mode_val = (int)bm;
+      #endif
+      Serial.printf("[EP] ssid='%s' up=%d ip=%s chan=%u band_mode=%d\n",
+                    apName, (int)up, WiFi.softAPIP().toString().c_str(),
+                    (unsigned)prim_chan, band_mode_val);
+    }
+  #endif
 
   #ifndef MARAUDER_V8
     Serial.print(F("ap ip address: "));
