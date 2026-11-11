@@ -4511,6 +4511,29 @@ void WiFiScan::RunSaveSSIDList(bool save_as) {
 void WiFiScan::RunEvilPortal(uint8_t scan_mode, uint16_t color) {
   startLog("evil_portal");
 
+  // The softAP shares the 2.4 GHz radio AND the internal/DMA heap with whatever
+  // scan ran before it. A prior Bluetooth sniff biases the coexistence
+  // arbiter toward BT (esp_coex_preference_set(ESP_COEX_PREFER_BT)) and nothing
+  // resets it, so the AP is starved of radio time: its SSID beacons but a phone
+  // associates and then hangs with no DHCP / data ("hosting but can't connect,
+  // just keeps loading"), specifically after running BLE/AP sniffers or wardrive
+  // first. A long sniff also leaves big result lists fragmenting the internal
+  // SRAM the AP needs for client buffers. Hand the radio + heap back clean here,
+  // exactly as RunAPScan does, before bringing the portal up.
+  esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+  this->shutdownBLE();                 // force the BT controller down (no-op if idle)
+  #ifdef HAS_BT
+    if (ble_devices && ble_devices->size() > 0) {
+      delete ble_devices;              // free the BLE list to defragment the DMA heap
+      ble_devices = new LinkedList<BleDevice>();
+    }
+  #endif
+  #ifndef MARAUDER_V8
+    Serial.printf("[EP] pre-AP free heap: internal=%u largest=%u\n",
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+  #endif
+
   this->setLEDMode(MODE_SNIFF);
 
   #ifdef HAS_SCREEN
