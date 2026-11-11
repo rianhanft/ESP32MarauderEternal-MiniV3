@@ -2297,7 +2297,7 @@ void MenuFunctions::RunSetup()
   nyanSnifferMenu.buildKind = MenuBuildKind::NYANBOX_SNIFFERS;
   nyanAttackMenu.buildKind = MenuBuildKind::NYANBOX_ATTACKS;
   nyanBleMenu.buildKind = MenuBuildKind::NYANBOX_BLE;
-  nyanBoxMenu.name = "NyanBox";
+  nyanBoxMenu.name = "MarauderBox";
   nyanSnifferMenu.name = "Sniffers";
   nyanAttackMenu.name = "Attacks";
   nyanBleMenu.name = "BLE Detectors";
@@ -4748,7 +4748,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
           });
         }
       #endif
-      this->addNodes(menu, "NyanBox", TFTMAGENTA, GENERAL_APPS, [this]() {
+      this->addNodes(menu, "MarauderBox", TFTMAGENTA, GENERAL_APPS, [this]() {
         this->changeMenu(&nyanBoxMenu, true);
       });
       this->addNodes(menu, text08, TFTBLUE, SETTINGS, [this]() {
