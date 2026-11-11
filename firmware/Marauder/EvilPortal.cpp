@@ -467,6 +467,16 @@ void EvilPortal::startAP() {
   bool up = false;
   for (int attempt = 0; attempt < 4; attempt++) {
     WiFi.mode(WIFI_AP);
+    // A prior Remote ID scan / wardrive / packet sniffer runs the WiFi driver in
+    // PROMISCUOUS mode with its own RX callback hooked. If that survives into AP
+    // mode, the softAP's inbound association + DHCP frames are delivered to the
+    // leftover sniffer callback instead of the AP's network stack -- the SSID
+    // beacons fine but a phone associates and then just hangs ("keeps loading").
+    // This is why Evil Portal broke specifically after using the drone/Remote ID
+    // scan. Force promiscuous off and drop any stale callback before we bring the
+    // AP up so the AP owns the whole RX path.
+    esp_wifi_set_promiscuous(false);
+    esp_wifi_set_promiscuous_rx_cb(nullptr);
     // Dual-band ESP32-C5: the radio runs on only ONE band at a time, and the
     // default band mode (AUTO = 2.4G + 5G) lets the softAP come up on a band/
     // channel the phone never scans -- so the SSID "hosts" but never appears in
