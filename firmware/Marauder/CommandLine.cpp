@@ -1074,7 +1074,7 @@ void CommandLine::runCommand(String input) {
         else if (k == "ibeacon") type = DT::IBeacon;
         else { ok = false; Serial.println(HELP_NYAN_BLE_CMD); }
         if (ok) {
-          Serial.println("NyanBox BLE detector (" + k + "). Stop with stopscan.");
+          Serial.println("MarauderBox BLE detector (" + k + "). Stop with stopscan.");
           BLEDeviceDetectors::run(type, 0, true);
           Serial.println(F("BLE detector stopped."));
         }
