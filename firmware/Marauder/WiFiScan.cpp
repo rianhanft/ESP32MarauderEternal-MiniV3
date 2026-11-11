@@ -4511,17 +4511,25 @@ void WiFiScan::RunSaveSSIDList(bool save_as) {
 void WiFiScan::RunEvilPortal(uint8_t scan_mode, uint16_t color) {
   startLog("evil_portal");
 
-  // The softAP shares the 2.4 GHz radio AND the internal/DMA heap with whatever
-  // scan ran before it. A prior Bluetooth sniff biases the coexistence
-  // arbiter toward BT (esp_coex_preference_set(ESP_COEX_PREFER_BT)) and nothing
-  // resets it, so the AP is starved of radio time: its SSID beacons but a phone
-  // associates and then hangs with no DHCP / data ("hosting but can't connect,
-  // just keeps loading"), specifically after running BLE/AP sniffers or wardrive
-  // first. A long sniff also leaves big result lists fragmenting the internal
-  // SRAM the AP needs for client buffers. Hand the radio + heap back clean here,
-  // exactly as RunAPScan does, before bringing the portal up.
+  // The softAP shares the 2.4 GHz radio with whatever scan ran before it. The
+  // Remote ID scan runs BLE *and* WiFi at once; when it stops it clears its
+  // ble_initialized flag but the BT CONTROLLER can be left ENABLED, still
+  // holding the shared radio and biasing coexistence toward Bluetooth. The AP
+  // then beacons (low duty) but is starved of the sustained radio time an
+  // association + DHCP handshake needs, so a phone connects and just spins
+  // ("hosting but keeps loading", only after the drone/Remote ID scan).
+  //
+  // shutdownBLE() is gated on ble_initialized and so no-ops here (the scan's own
+  // stop already cleared it). Force the controller down UNCONDITIONALLY instead
+  // -- the DeviceScout safety-net pattern -- then rebalance coexistence so WiFi
+  // gets the radio back. No-op on the healthy path (controller already idle).
+  #ifdef HAS_BT
+    if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED)
+      esp_bt_controller_disable();
+    if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED)
+      esp_bt_controller_deinit();
+  #endif
   esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
-  this->shutdownBLE();                 // force the BT controller down (no-op if idle)
   #ifdef HAS_BT
     if (ble_devices && ble_devices->size() > 0) {
       delete ble_devices;              // free the BLE list to defragment the DMA heap
