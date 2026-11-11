@@ -1,5 +1,6 @@
 #include "EvilPortal.h"
 #include <esp_wifi.h>   // esp_wifi_set_band_mode() -- pin the portal AP to 2.4 GHz on the dual-band C5
+#include <esp_heap_caps.h>   // free-heap readout for the on-screen diagnostic line
 
 char apName[MAX_AP_NAME_SIZE] = "PORTAL";
 
@@ -669,6 +670,26 @@ void EvilPortal::drawPortalStatus() {
 
   line(String("SSID: ") + apName, TFT_WHITE, y); y += lh;
   line(String("Page: ") + this->target_html_name, TFT_CYAN, y); y += lh;
+
+  // Diagnostic line (read it off the screen / in a photo when a phone won't
+  // connect): actual AP channel, band mode, and free INTERNAL heap in KB.
+  //   ch1  = 2.4 GHz channel 1 (good);  ch>=32 = still on 5 GHz (band pin failed)
+  //   bm1  = 2.4G-only (good);  bm3 = AUTO/dual-band (not pinned)
+  //   low h (< ~20k) = fragmented heap, AP can't allocate client buffers
+  {
+    uint8_t p_ch = 0;
+    wifi_second_chan_t s_ch = WIFI_SECOND_CHAN_NONE;
+    esp_wifi_get_channel(&p_ch, &s_ch);
+    int bm = -1;
+    #if defined(SOC_WIFI_SUPPORT_5G) && SOC_WIFI_SUPPORT_5G
+      wifi_band_mode_t b = WIFI_BAND_MODE_AUTO;
+      if (esp_wifi_get_band_mode(&b) == ESP_OK) bm = (int)b;
+    #endif
+    line(String("ch") + p_ch + " bm" + bm + " h" +
+         (int)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024) + "k",
+         TFT_YELLOW, y);
+    y += lh;
+  }
 
   // Clients + elapsed on one line.
   const uint32_t elapsed = (now - this->portal_start_ms) / 1000;
