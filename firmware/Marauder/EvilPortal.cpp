@@ -1,5 +1,5 @@
 #include "EvilPortal.h"
-#include <esp_wifi.h>   // esp_wifi_set_band_mode() / esp_wifi_set_max_tx_power() on the dual-band C5
+#include <esp_wifi.h>   // esp_wifi_set_ps() -- keep the softAP out of modem-sleep
 
 char apName[MAX_AP_NAME_SIZE] = "PORTAL";
 
@@ -464,22 +464,21 @@ void EvilPortal::startAP() {
   // worse on the Mini V3 with its smaller internal-heap headroom). A short settle
   // + retry brings it up reliably. On the healthy path (e.g. the V8) it comes up
   // on the first attempt and the rest of the loop never runs.
+  // Match the proven Eternal 1.15.x/1.16.x bring-up: a PLAIN Arduino softAP on a
+  // 2.4 GHz channel, with NO per-activation esp_wifi_set_band_mode() call. That
+  // version hosts a strong, visible portal on the dual-band C5 without pinning the
+  // band in the portal path (it only pins the band in the separate raw-frame attack
+  // path). Our added esp_wifi_set_band_mode(2G_ONLY) reconfigured the radio on every
+  // activation and re-asserted the driver's modem-sleep default on the softAP, which
+  // throttled the beacon and made the Mini's signal faint/flaky -- bumping TX power
+  // couldn't help because the beacon was being gated by sleep, not by low power.
+  // The retry loop stays (a fragmented internal heap after a dense scan can make the
+  // first WiFi.softAP() fail); on the healthy path it comes up on the first attempt.
   bool up = false;
   for (int attempt = 0; attempt < 4; attempt++) {
     WiFi.mode(WIFI_AP);
-    // Dual-band ESP32-C5: the radio runs on only ONE band at a time, and the
-    // default band mode (AUTO = 2.4G + 5G) lets the softAP come up on a band/
-    // channel the phone never scans -- so the SSID "hosts" but never appears in
-    // the Wi-Fi list ("says hosting but doesn't pop up"). Pin the portal to
-    // 2.4 GHz, the band every phone scans and the one captive-portal detection
-    // expects. Must run AFTER WiFi.mode() has started the driver; the band mode
-    // can't be set before the driver is up.
-    #if defined(SOC_WIFI_SUPPORT_5G) && SOC_WIFI_SUPPORT_5G
-      esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY);
-    #endif
     WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
-    // Explicit 2.4 GHz channel 1 -- don't rely on the core's default channel
-    // once the band is pinned.
+    // Channel 1 -- a 2.4 GHz channel, the band every phone scans.
     up = WiFi.softAP(apName, NULL, 1);
     if (up && WiFi.softAPIP() != IPAddress(0, 0, 0, 0))
       break;
@@ -488,24 +487,11 @@ void EvilPortal::startAP() {
     delay(200);
   }
 
-  // Beacon at maximum TX power so the portal reaches as far as the antenna
-  // allows. The scan path sets this (WiFiScan.cpp), but the Arduino softAP path
-  // doesn't, so the AP can otherwise sit at a lower leftover power. Must run
-  // after the driver is started (softAP above started it). 84 = chip max; the
-  // driver clamps it to whatever the C5 actually supports.
-  if (up) {
-    esp_wifi_set_max_tx_power(84);
-    // An access point must NEVER enter WiFi modem-sleep. The driver's default
-    // power-save mode dozes the radio between beacons -- and esp_wifi_set_band_mode()
-    // above re-asserts that default when it reconfigures the radio for 2.4 GHz.
-    // A dozing softAP sends its beacon weak/intermittently, so the phone shows a
-    // faint, flaky signal even though TX power is already maxed. (This is why
-    // bumping TX power alone changed nothing: the beacon was being throttled by
-    // modem-sleep, not by low power.) Pin power-save OFF so the portal beacons
-    // continuously at full strength -- this is what the V8 effectively ran before
-    // the band-mode change started re-enabling sleep on the softAP.
+  // An access point must never modem-sleep. The Eternal driver pins this OFF in its
+  // own WiFi init (WiFiScan.cpp), so do the same here: the beacon then goes out
+  // continuously at full strength. Safe no-op on a softAP that already isn't sleeping.
+  if (up)
     esp_wifi_set_ps(WIFI_PS_NONE);
-  }
 
   #ifndef MARAUDER_V8
     Serial.print(F("ap ip address: "));
