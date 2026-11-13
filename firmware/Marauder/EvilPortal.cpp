@@ -1,5 +1,6 @@
 #include "EvilPortal.h"
 #include <esp_wifi.h>   // esp_wifi_set_band_mode() -- pin the portal AP to 2.4 GHz on the dual-band C5
+#include <esp_heap_caps.h>   // PSRAM / internal-heap readout for the on-screen diagnostic
 
 char apName[MAX_AP_NAME_SIZE] = "PORTAL";
 
@@ -635,6 +636,25 @@ void EvilPortal::drawPortalStatus() {
 
   line(String("SSID: ") + apName, TFT_WHITE, y); y += lh;
   line(String("Page: ") + this->target_html_name, TFT_CYAN, y); y += lh;
+
+  // --- DIAGNOSTIC (temporary) -------------------------------------------------
+  // Why does the Mini's SSID not beacon while the V8's does? Read this off the
+  // screen: PSRAM present (PS>0 confirms the chip), free INTERNAL/DMA heap (IR)
+  // and its largest block (BLK) -- the softAP needs a contiguous DMA block to go
+  // on air -- plus the actual AP channel (c) and band mode (b: 1=2.4G-only).
+  {
+    const int psk  = (int)(heap_caps_get_total_size(MALLOC_CAP_SPIRAM) / 1024);
+    const int irk  = (int)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+    const int blk  = (int)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
+    uint8_t pch = 0; wifi_second_chan_t sch = WIFI_SECOND_CHAN_NONE;
+    esp_wifi_get_channel(&pch, &sch);
+    int bm = -1;
+    wifi_band_mode_t b = WIFI_BAND_MODE_AUTO;
+    if (esp_wifi_get_band_mode(&b) == ESP_OK) bm = (int)b;
+    line(String("PS") + psk + "k IR" + irk + "k", TFT_YELLOW, y); y += lh;
+    line(String("BLK") + blk + "k c" + pch + " b" + bm, TFT_YELLOW, y); y += lh;
+  }
+  // --- end diagnostic ---------------------------------------------------------
 
   // Clients + elapsed on one line.
   const uint32_t elapsed = (now - this->portal_start_ms) / 1000;
