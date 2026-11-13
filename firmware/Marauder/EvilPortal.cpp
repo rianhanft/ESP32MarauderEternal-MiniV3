@@ -493,8 +493,19 @@ void EvilPortal::startAP() {
   // doesn't, so the AP can otherwise sit at a lower leftover power. Must run
   // after the driver is started (softAP above started it). 84 = chip max; the
   // driver clamps it to whatever the C5 actually supports.
-  if (up)
+  if (up) {
     esp_wifi_set_max_tx_power(84);
+    // An access point must NEVER enter WiFi modem-sleep. The driver's default
+    // power-save mode dozes the radio between beacons -- and esp_wifi_set_band_mode()
+    // above re-asserts that default when it reconfigures the radio for 2.4 GHz.
+    // A dozing softAP sends its beacon weak/intermittently, so the phone shows a
+    // faint, flaky signal even though TX power is already maxed. (This is why
+    // bumping TX power alone changed nothing: the beacon was being throttled by
+    // modem-sleep, not by low power.) Pin power-save OFF so the portal beacons
+    // continuously at full strength -- this is what the V8 effectively ran before
+    // the band-mode change started re-enabling sleep on the softAP.
+    esp_wifi_set_ps(WIFI_PS_NONE);
+  }
 
   #ifndef MARAUDER_V8
     Serial.print(F("ap ip address: "));
