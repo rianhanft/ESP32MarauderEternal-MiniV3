@@ -1158,6 +1158,7 @@ class WiFiScan
         .cc = "PH",
         .schan = 1,
         .nchan = 13,
+        .max_tx_power = 20,   // Eternal 1.16.x sets this; the v1.19.2 merge dropped it (-> 0)
         .policy = WIFI_COUNTRY_POLICY_AUTO,
       };
 

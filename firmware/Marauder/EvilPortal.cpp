@@ -3,6 +3,11 @@
 
 char apName[MAX_AP_NAME_SIZE] = "PORTAL";
 
+// Effective max TX power (quarter-dBm units) read back from the driver right
+// after the softAP comes up, shown on the portal HUD. -127 = not read yet.
+// Diagnostic: tells us whether the "weak signal" is a TX-power clamp or not.
+static int8_t g_ep_tx_power = -127;
+
 char* index_html = nullptr;
 
 namespace {
@@ -487,11 +492,29 @@ void EvilPortal::startAP() {
     delay(200);
   }
 
-  // An access point must never modem-sleep. The Eternal driver pins this OFF in its
-  // own WiFi init (WiFiScan.cpp), so do the same here: the beacon then goes out
-  // continuously at full strength. Safe no-op on a softAP that already isn't sleeping.
-  if (up)
+  if (up) {
+    // Re-assert a full-power regulatory table before requesting TX power. A scan
+    // run before the portal can program a low/zero max_tx_power ceiling into the
+    // driver (our v1.19.2 country table dropped the field Eternal sets to 20 dBm),
+    // and the driver clamps all TX to that ceiling -- which is why requesting more
+    // power earlier changed nothing. Assert cc=PH, 20 dBm, then request 20 dBm.
+    wifi_country_t ap_country = {};
+    ap_country.cc[0] = 'P'; ap_country.cc[1] = 'H'; ap_country.cc[2] = '\0';
+    ap_country.schan = 1;
+    ap_country.nchan = 13;
+    ap_country.max_tx_power = 20;
+    ap_country.policy = WIFI_COUNTRY_POLICY_AUTO;
+    esp_wifi_set_country(&ap_country);
+    esp_wifi_set_max_tx_power(80);   // 80 quarter-dBm = 20 dBm (the country ceiling)
+    // An access point must never modem-sleep; pin power-save OFF so the beacon
+    // goes out continuously (the Eternal driver does the same in its WiFi init).
     esp_wifi_set_ps(WIFI_PS_NONE);
+    // Read back the TRUE effective power the driver settled on. ~20 dBm (raw 80)
+    // means power is NOT the problem; a low value means the driver is clamping.
+    int8_t eff = 0;
+    if (esp_wifi_get_max_tx_power(&eff) == ESP_OK)
+      g_ep_tx_power = eff;
+  }
 
   #ifndef MARAUDER_V8
     Serial.print(F("ap ip address: "));
@@ -640,6 +663,16 @@ void EvilPortal::drawPortalStatus() {
 
   line(String("SSID: ") + apName, TFT_WHITE, y); y += lh;
   line(String("Page: ") + this->target_html_name, TFT_CYAN, y); y += lh;
+
+  // Diagnostic: the real effective TX power the driver settled on at AP bring-up.
+  {
+    char txs[22];
+    if (g_ep_tx_power > -127)
+      snprintf(txs, sizeof(txs), "TX %ddBm (r%d)", g_ep_tx_power / 4, g_ep_tx_power);
+    else
+      snprintf(txs, sizeof(txs), "TX ?");
+    line(String(txs), TFT_YELLOW, y); y += lh;
+  }
 
   // Clients + elapsed on one line.
   const uint32_t elapsed = (now - this->portal_start_ms) / 1000;
