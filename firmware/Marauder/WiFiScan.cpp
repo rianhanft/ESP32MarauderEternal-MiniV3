@@ -11551,7 +11551,16 @@ void WiFiScan::channelHop(bool filtered, bool ranged) {
         bot_chan = (activity_page * CHAN_PER_PAGE) - CHAN_PER_PAGE;
       }
       else {
-        top_chan = DUAL_BAND_CHANNELS;
+        // The ESP32-C5 has a single radio and can only be on one band at a time,
+        // so auto-hopping onto the 5 GHz entries in dual_band_channels stalls the
+        // sweep on the band switch (and DFS "listen for radar" dwell) -- it
+        // visibly sticks on a 5 GHz channel like 153, and in a dense 2.4 GHz area
+        // the sweep never gets back around to catch all the APs. Keep the auto-hop
+        // on 2.4 GHz (indices 0-12 = channels 1-13, matching the PH regulatory
+        // domain) so the sweep stays fast and never sticks. (Sweeping 5 GHz would
+        // need per-channel band switching, which is slow and defeats dense 2.4 GHz
+        // coverage.)
+        top_chan = 12;   // last 2.4 GHz index (channel 13)
         bot_chan = 0;
       }
 
