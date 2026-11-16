@@ -7,6 +7,10 @@ char apName[MAX_AP_NAME_SIZE] = "PORTAL";
 // after the softAP comes up, shown on the portal HUD. -127 = not read yet.
 // Diagnostic: tells us whether the "weak signal" is a TX-power clamp or not.
 static int8_t g_ep_tx_power = -127;
+// Whether 802.11b ended up enabled on the softAP's 2.4 GHz PHY (read back after
+// we assert the legacy protocol). 11b carries the long-range 1 Mbps beacon rate
+// phones rely on to see the AP at distance.
+static bool g_ep_11b = false;
 
 char* index_html = nullptr;
 
@@ -493,24 +497,35 @@ void EvilPortal::startAP() {
   }
 
   if (up) {
-    // Re-assert a full-power regulatory table before requesting TX power. A scan
-    // run before the portal can program a low/zero max_tx_power ceiling into the
-    // driver (our v1.19.2 country table dropped the field Eternal sets to 20 dBm),
-    // and the driver clamps all TX to that ceiling -- which is why requesting more
-    // power earlier changed nothing. Assert cc=PH, 20 dBm, then request 20 dBm.
-    wifi_country_t ap_country = {};
-    ap_country.cc[0] = 'P'; ap_country.cc[1] = 'H'; ap_country.cc[2] = '\0';
-    ap_country.schan = 1;
-    ap_country.nchan = 13;
-    ap_country.max_tx_power = 20;
-    ap_country.policy = WIFI_COUNTRY_POLICY_AUTO;
-    esp_wifi_set_country(&ap_country);
-    esp_wifi_set_max_tx_power(80);   // 80 quarter-dBm = 20 dBm (the country ceiling)
+    // TX power is already confirmed maxed (20 dBm), yet the beacon is seen by a
+    // laptop but not a phone -- the signature of a beacon DATA-RATE problem, not a
+    // power problem. Force a clean, phone-friendly 2.4 GHz PHY on the softAP:
+    // 11b/g/n only, with NO Long Range (LR, Espressif-proprietary) and NO 11ax.
+    // Including 11b makes beacons go out at the robust 1 Mbps long-range basic
+    // rate every phone relies on to detect the AP at distance; dropping 11b (which
+    // a scan/attack run before the portal can do -- e.g. the LR/11ax beacon paths)
+    // pushes beacons to a higher OFDM rate with much shorter reach, so a laptop
+    // still decodes them but a phone at the same spot can't. Assert the legacy set
+    // every activation so the portal beacon is always clean.
+    #ifdef HAS_DUAL_BAND
+      wifi_protocols_t ap_proto = {
+        .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N,
+        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX,
+      };
+      esp_wifi_set_protocols(WIFI_IF_AP, &ap_proto);
+      wifi_protocols_t rp = {};
+      if (esp_wifi_get_protocols(WIFI_IF_AP, &rp) == ESP_OK)
+        g_ep_11b = (rp.ghz_2g & WIFI_PROTOCOL_11B) != 0;
+    #else
+      esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+      uint8_t rp = 0;
+      if (esp_wifi_get_protocol(WIFI_IF_AP, &rp) == ESP_OK)
+        g_ep_11b = (rp & WIFI_PROTOCOL_11B) != 0;
+    #endif
+    esp_wifi_set_max_tx_power(80);   // 80 quarter-dBm = 20 dBm
     // An access point must never modem-sleep; pin power-save OFF so the beacon
     // goes out continuously (the Eternal driver does the same in its WiFi init).
     esp_wifi_set_ps(WIFI_PS_NONE);
-    // Read back the TRUE effective power the driver settled on. ~20 dBm (raw 80)
-    // means power is NOT the problem; a low value means the driver is clamping.
     int8_t eff = 0;
     if (esp_wifi_get_max_tx_power(&eff) == ESP_OK)
       g_ep_tx_power = eff;
@@ -666,9 +681,10 @@ void EvilPortal::drawPortalStatus() {
 
   // Diagnostic: the real effective TX power the driver settled on at AP bring-up.
   {
-    char txs[22];
+    char txs[24];
     if (g_ep_tx_power > -127)
-      snprintf(txs, sizeof(txs), "TX %ddBm (r%d)", g_ep_tx_power / 4, g_ep_tx_power);
+      snprintf(txs, sizeof(txs), "TX%ddBm PHY:%s", g_ep_tx_power / 4,
+               g_ep_11b ? "11bgn" : "NO-11b");
     else
       snprintf(txs, sizeof(txs), "TX ?");
     line(String(txs), TFT_YELLOW, y); y += lh;
