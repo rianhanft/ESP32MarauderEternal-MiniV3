@@ -11,7 +11,7 @@ set -euo pipefail
 BOARD="${1:-PANCAKE}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
-SKETCH_DIR="${PROJECT_DIR}/firmware/Marauder"
+SKETCH_DIR="${MARAUDER_SKETCH_DIR:-${PROJECT_DIR}/firmware/Marauder}"
 LIBRARY_DIR="${PROJECT_DIR}/libraries"
 BUILD_DIR="${2:-${PROJECT_DIR}/build/${BOARD}}"
 CACHE_DIR="${BUILD_DIR}/cache"
