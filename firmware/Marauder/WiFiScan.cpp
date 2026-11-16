@@ -3197,7 +3197,18 @@ void WiFiScan::startWiFiAttacks(uint8_t scan_mode, uint16_t color, const char* t
   }
         
   packets_sent = 0;
-  esp_wifi_init(&cfg);
+  // --- C5-safe attack init (the heavy default profile can fail esp_wifi_init()
+  // on the ESP32-C5 after an AP scan, and the failure was never checked, leaving
+  // the driver half-up so no attack frames transmitted -- deauth/attacks "did
+  // nothing" on the C5. Use the lean cfg2 profile and verify it, then let the C5
+  // TX path settle before the attack loop.) ---
+  esp_err_t _init_st = esp_wifi_init(&cfg2);
+  if (_init_st != ESP_OK) {
+    Serial.printf("[WiFi Attack] esp_wifi_init(lean) failed: %s\n",
+                  esp_err_to_name(_init_st));
+    esp_wifi_deinit();
+    _init_st = esp_wifi_init(&cfg2);
+  }
   #ifdef HAS_IDF_3
     esp_wifi_set_country(&country);
   #endif
@@ -3214,6 +3225,7 @@ void WiFiScan::startWiFiAttacks(uint8_t scan_mode, uint16_t color, const char* t
   this->changeChannel(this->set_channel);
   esp_wifi_set_promiscuous(true);
   esp_wifi_set_max_tx_power(82);
+  delay(75);   // C5 TX-side settle before injecting raw frames
   this->wifi_initialized = true;
   this->setLEDMode(MODE_ATTACK);
   initTime = millis();

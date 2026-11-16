@@ -3,8 +3,9 @@
  *
  * Transport/message handling is adapted from nyanBOX (MIT) and
  * opendroneid-core-c (Apache-2.0). This version only replays a drone explicitly
- * selected from the most recent passive Remote ID scan, uses a moderate update
- * interval, and stops automatically after 60 seconds.
+ * selected from the most recent passive Remote ID scan (60 s auto-stop) or
+ * built from an SD file (runs until the user stops it), and uses a moderate
+ * update interval.
  * SPDX-License-Identifier: MIT AND Apache-2.0
  */
 
@@ -22,9 +23,15 @@
 
 #include "Display.h"
 #include "Switches.h"
+#include "NyanBoxInput.h"   // rotation-aware screen metrics (nbScreenW/H)
 
 extern Display display_obj;
 extern Switches c_btn;
+
+#ifdef HAS_GPS
+  #include "GpsInterface.h"
+  extern GpsInterface gps_obj;
+#endif
 
 namespace DroneRemoteIDSpoofer {
 namespace {
@@ -32,6 +39,19 @@ namespace {
 constexpr uint8_t DEFAULT_WIFI_CHANNEL = 6;
 constexpr uint16_t MESSAGE_INTERVAL_MS = 250;
 constexpr uint32_t MAX_RUNTIME_MS = 60000;
+
+// ODID message-type indices into CapturedDrone::messages[] (matching the
+// decoder's message types). The Location message carries the drone's position;
+// the System message carries the operator position.
+constexpr uint8_t ODID_MSG_LOCATION = 1;
+constexpr uint8_t ODID_MSG_SYSTEM = 4;
+
+enum GpsSpoofState : uint8_t {
+  GPS_UNSUPPORTED,   // firmware built without GPS
+  GPS_NO_FIX,        // GPS present but no fix -> replay the captured coordinates
+  GPS_NO_LOC_MSG,    // have a fix, but the captured drone had no Location message
+  GPS_TRACKING       // overwriting the broadcast position with our live fix
+};
 
 DroneRemoteID::CapturedDrone selectedTarget{};
 bool targetSelected = false;
@@ -51,6 +71,56 @@ void releaseButton(Switches& button) {
 void putLe16(uint8_t* output, uint16_t value) {
   output[0] = value & 0xFF;
   output[1] = value >> 8;
+}
+
+void putI32Le(uint8_t* output, int32_t value) {
+  const uint32_t raw = static_cast<uint32_t>(value);
+  output[0] = raw & 0xFF;
+  output[1] = (raw >> 8) & 0xFF;
+  output[2] = (raw >> 16) & 0xFF;
+  output[3] = (raw >> 24) & 0xFF;
+}
+
+// Rewrite the replayed drone's broadcast position to this Marauder's own live
+// GPS fix, so a second Marauder running Remote ID plots the spoofed drone at
+// THIS unit's real location -- the drone's on-map distance then reflects how
+// far apart the two units are and updates as this unit moves. Overwrites the
+// Location message lat/lon (bytes 5-8 / 9-12) and the System message operator
+// lat/lon (bytes 2-5 / 6-9) in place. With no fix it leaves the captured
+// coordinates untouched. Authorized testing between devices you own.
+GpsSpoofState applyLiveGps() {
+#ifdef HAS_GPS
+  if (!gps_obj.getFixStatus())
+    return GPS_NO_FIX;
+  // GPS ints are microdegrees (1e-6 deg); ODID encodes 1e-7 deg, so scale x10.
+  const int32_t latE7 =
+      static_cast<int32_t>(static_cast<int64_t>(gps_obj.getLatInt()) * 10);
+  const int32_t lonE7 =
+      static_cast<int32_t>(static_cast<int64_t>(gps_obj.getLonInt()) * 10);
+  if (selectedTarget.messageMask & (1 << ODID_MSG_SYSTEM)) {
+    putI32Le(selectedTarget.messages[ODID_MSG_SYSTEM] + 2, latE7);
+    putI32Le(selectedTarget.messages[ODID_MSG_SYSTEM] + 6, lonE7);
+  }
+  if (!(selectedTarget.messageMask & (1 << ODID_MSG_LOCATION)))
+    return GPS_NO_LOC_MSG;
+  uint8_t* loc = selectedTarget.messages[ODID_MSG_LOCATION];
+  putI32Le(loc + 5, latE7);
+  putI32Le(loc + 9, lonE7);
+  // The broadcast position is now our own live GPS fix, so replace the encoder's
+  // "accuracy unknown" (byte 19 = 0) with a tight value and report a real
+  // geodetic altitude. Otherwise a detector plots the exact coordinate with a
+  // huge uncertainty, which reads as an inaccurate location on the Remote ID
+  // scan. ODID altitude: raw = (metres + 1000) / 0.5; byte 19 packs vertical
+  // accuracy in the high nibble and horizontal in the low (11 = <3 m, 3 = <25 m).
+  float altRawF = (gps_obj.getAlt() + 1000.0f) * 2.0f + 0.5f;
+  if (altRawF < 0.0f) altRawF = 0.0f;
+  if (altRawF > 65535.0f) altRawF = 65535.0f;
+  putLe16(loc + 15, static_cast<uint16_t>(altRawF));   // geodetic altitude
+  loc[19] = (3 << 4) | 11;                             // vert <25 m, horiz <3 m
+  return GPS_TRACKING;
+#else
+  return GPS_UNSUPPORTED;
+#endif
 }
 
 bool parseAddress(const char* address, uint8_t output[6]) {
@@ -138,23 +208,55 @@ bool sendWifiBeacon(
 
 void drawStatus(uint32_t started, uint32_t blePackets, uint32_t wifiPackets,
                 uint8_t wifiChannel, uint8_t messageCount, bool bleOkay,
-                bool wifiOkay, bool exactBleAddress, bool exactWifiAddress) {
+                bool wifiOkay, bool exactBleAddress, bool exactWifiAddress,
+                uint8_t gpsState, bool autoStop) {
   const uint32_t elapsed = millis() - started;
   const uint32_t remaining = elapsed >= MAX_RUNTIME_MS ? 0 :
       (MAX_RUNTIME_MS - elapsed + 999) / 1000;
   display_obj.tft.fillScreen(TFT_BLACK);
-  display_obj.tft.fillRect(0, 0, TFT_WIDTH, 16, TFT_RED);
+  display_obj.tft.fillRect(0, 0, nbScreenW(), 16, TFT_RED);
   display_obj.tft.setTextDatum(TC_DATUM);
   display_obj.tft.setTextSize(1);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_RED);
-  display_obj.tft.drawString("AUTHORIZED DRONE SPOOF", TFT_WIDTH / 2, 4, 1);
+  display_obj.tft.drawString("AUTHORIZED DRONE SPOOF", nbScreenW() / 2, 4, 1);
   display_obj.tft.setTextDatum(TL_DATUM);
   display_obj.tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-  display_obj.tft.setViewport(2, 19, TFT_WIDTH - 4, 14);
+  display_obj.tft.setViewport(2, 19, nbScreenW() - 4, 14);
   display_obj.tft.setCursor(0, 2);
   display_obj.tft.print(selectedTarget.id);
   display_obj.tft.resetViewport();
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+#ifdef SINGLE_BUTTON_NAV
+  // Compact 160x80 (dongle) layout: the stacked per-radio detail lines run off
+  // the short panel, so condense them to one line and keep what matters on a
+  // single screen -- the live GPS/track status and the run/countdown line.
+  display_obj.tft.drawString(String("Types:") + messageCount +
+      "  BLE:" + (bleOkay ? "on" : "x") + " WiFi:" + (wifiOkay ? "on" : "x"),
+      4, 33, 1);
+  #ifdef HAS_GPS
+    uint16_t gpsColor = TFT_DARKGREY;
+    String gpsText = "GPS: captured loc";
+    if (gpsState == GPS_TRACKING) {
+      gpsColor = TFT_GREEN;
+      gpsText = String("GPS ") + gps_obj.getLat() + "," + gps_obj.getLon();
+    } else if (gpsState == GPS_NO_LOC_MSG) {
+      gpsColor = TFT_ORANGE;
+      gpsText = "GPS: no loc msg";
+    }
+    display_obj.tft.setTextColor(gpsColor, TFT_BLACK);
+    display_obj.tft.setViewport(4, 47, nbScreenW() - 8, 13);
+    display_obj.tft.setCursor(0, 2);
+    display_obj.tft.print(gpsText);
+    display_obj.tft.resetViewport();
+  #else
+    (void)gpsState;
+  #endif
+  display_obj.tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+  if (autoStop)
+    display_obj.tft.drawString(String("Auto stop: ") + remaining + "s", 4, 59, 1);
+  else
+    display_obj.tft.drawString("Running (no auto-stop)", 4, 59, 1);
+#else
   display_obj.tft.drawString(String("Captured types: ") + messageCount,
                              4, 36, 1);
   display_obj.tft.drawString(String("BLE: ") + (bleOkay ? "on " : "failed ") +
@@ -162,15 +264,44 @@ void drawStatus(uint32_t started, uint32_t blePackets, uint32_t wifiPackets,
   display_obj.tft.drawString(String("WiFi: ") + (wifiOkay ? "ch" : "failed ") +
       (wifiOkay ? String(wifiChannel) : String("")) + " " + wifiPackets +
       (exactWifiAddress ? " exact" : " local"), 4, 64, 1);
-  display_obj.tft.setViewport(4, 78, TFT_WIDTH - 8, 13);
+  // Live-GPS spoof-position status: green when the broadcast position is being
+  // driven by our own fix, else a note that captured coordinates are replayed.
+  #ifdef HAS_GPS
+    uint16_t gpsColor = TFT_DARKGREY;
+    String gpsText = "GPS: no fix (captured loc)";
+    if (gpsState == GPS_TRACKING) {
+      gpsColor = TFT_GREEN;
+      gpsText = String("GPS: live ") + gps_obj.getLat() + "," + gps_obj.getLon();
+    } else if (gpsState == GPS_NO_LOC_MSG) {
+      gpsColor = TFT_ORANGE;
+      gpsText = "GPS fix: target has no loc msg";
+    }
+    display_obj.tft.setTextColor(gpsColor, TFT_BLACK);
+    display_obj.tft.setViewport(4, 78, nbScreenW() - 8, 13);
+    display_obj.tft.setCursor(0, 2);
+    display_obj.tft.print(gpsText);
+    display_obj.tft.resetViewport();
+    display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  #else
+    (void)gpsState;
+  #endif
+  display_obj.tft.setViewport(4, 92, nbScreenW() - 8, 13);
   display_obj.tft.setCursor(0, 2);
   display_obj.tft.print(selectedTarget.address);
   display_obj.tft.resetViewport();
   display_obj.tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-  display_obj.tft.drawString(String("Auto stop: ") + remaining + "s", 4, 94, 1);
+  if (autoStop)
+    display_obj.tft.drawString(String("Auto stop: ") + remaining + "s", 4, 106, 1);
+  else
+    display_obj.tft.drawString("Running (no auto-stop)", 4, 106, 1);
+#endif
   display_obj.tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display_obj.tft.setCursor(2, TFT_HEIGHT - 9);
-  display_obj.tft.print(F("Center: stop now"));
+  display_obj.tft.setCursor(2, nbScreenH() - 9);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.print(F("Tap BOOT: stop now"));
+  #else
+    display_obj.tft.print(F("Center: stop now"));
+  #endif
 }
 
 void drawError(const char* message) {
@@ -181,8 +312,12 @@ void drawError(const char* message) {
   display_obj.tft.print(message);
   display_obj.tft.setTextWrap(false);
   display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  display_obj.tft.setCursor(4, TFT_HEIGHT - 12);
-  display_obj.tft.print(F("Center: return"));
+  display_obj.tft.setCursor(4, nbScreenH() - 12);
+  #ifdef SINGLE_BUTTON_NAV
+    display_obj.tft.print(F("Tap BOOT: return"));
+  #else
+    display_obj.tft.print(F("Center: return"));
+  #endif
 }
 
 }  // namespace
@@ -195,7 +330,7 @@ bool selectTarget(const DroneRemoteID::CapturedDrone& target) {
   return true;
 }
 
-void run() {
+void run(bool autoStop) {
   releaseButton(c_btn);
   if (!targetSelected || selectedTarget.messageMask == 0) {
     drawError("No captured target selected. Run Drone Remote ID first.");
@@ -265,6 +400,7 @@ void run() {
       NimBLEDevice::setOwnAddr(randomAddress) &&
       NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RANDOM);
   NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
+  applyLiveGps();   // prime the broadcast position from our live fix, if any
   const uint8_t* firstMessage = selectedTarget.messages[messageTypes[0]];
   if (bleOkay)
     bleOkay = updateBleAdvertisement(advertising, firstMessage, 0);
@@ -283,13 +419,21 @@ void run() {
     uint8_t messageIndex = 0;
     uint8_t counter = 0;
     uint16_t sequence = 0;
-    Serial.printf("[Drone Spoof] replaying captured RID %s (%u message types); maximum 60 seconds\n",
-                  selectedTarget.id, messageCount);
-    while (millis() - started < MAX_RUNTIME_MS) {
+    GpsSpoofState gpsState = applyLiveGps();
+    Serial.printf("[Drone Spoof] replaying captured RID %s (%u message types); %s\n",
+                  selectedTarget.id, messageCount,
+                  autoStop ? "maximum 60 seconds" : "no auto-stop (Center to stop)");
+    while (!autoStop || millis() - started < MAX_RUNTIME_MS) {
+      #ifdef HAS_GPS
+        gps_obj.main();   // keep our fix fresh during this blocking loop
+      #endif
       if (c_btn.justPressed())
         break;
       const uint32_t now = millis();
       if (static_cast<int32_t>(now - nextMessage) >= 0) {
+        // Re-point the replayed drone (and operator) at our current fix before
+        // broadcasting, so the position tracks us as we move.
+        gpsState = applyLiveGps();
         const uint8_t* message = selectedTarget.messages[messageTypes[messageIndex]];
         if (bleOkay) {
           if (updateBleAdvertisement(advertising, message, counter))
@@ -310,7 +454,8 @@ void run() {
       }
       if (static_cast<int32_t>(now - nextDraw) >= 0) {
         drawStatus(started, blePackets, wifiPackets, wifiChannel, messageCount,
-                   bleOkay, wifiOkay, exactBleAddress, exactWifiAddress);
+                   bleOkay, wifiOkay, exactBleAddress, exactWifiAddress, gpsState,
+                   autoStop);
         nextDraw = now + 500;
       }
       delay(5);
@@ -370,8 +515,8 @@ void run() {
     display_obj.tft.fillScreen(TFT_BLACK);
     display_obj.tft.setTextDatum(MC_DATUM);
     display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
-    display_obj.tft.drawString("Spoof complete", TFT_WIDTH / 2, (TFT_HEIGHT / 2) - 10, 2);
-    display_obj.tft.drawString("Resetting radio...", TFT_WIDTH / 2, (TFT_HEIGHT / 2) + 10, 2);
+    display_obj.tft.drawString("Spoof complete", nbScreenW() / 2, (nbScreenH() / 2) - 10, 2);
+    display_obj.tft.drawString("Resetting radio...", nbScreenW() / 2, (nbScreenH() / 2) + 10, 2);
     display_obj.tft.setTextDatum(TL_DATUM);
   #endif
   delay(1500);
@@ -384,7 +529,7 @@ void run() {
 
 namespace DroneRemoteIDSpoofer {
 bool selectTarget(const DroneRemoteID::CapturedDrone&) { return false; }
-void run() {}
+void run(bool) {}
 }
 
 #endif
