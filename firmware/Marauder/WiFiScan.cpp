@@ -11541,7 +11541,17 @@ void WiFiScan::drawCameraDeauthStatus() {
 void WiFiScan::changeChannel(int chan) {
   if (chan != -1)
     this->set_channel = chan;
-  esp_wifi_set_channel(this->set_channel, WIFI_SECOND_CHAN_NONE);
+  // THE black-screen / scan-stick root cause: the ESP32-C5 has ONE radio, and
+  // esp_wifi_set_channel() on a 5 GHz channel BLOCKS/wedges it in this driver
+  // setup (no non-hanging 5 GHz band switch was found). EVERY attack and scan
+  // tunes through here, so a single selected 5 GHz deauth target -- or a 5 GHz
+  // step in a dual-band sweep -- froze the whole firmware before the attack HUD
+  // could draw: a pure-black, frozen screen. Only tune 2.4 GHz channels (1-14);
+  // a 5 GHz request is skipped (radio stays on its last 2.4 GHz channel) instead
+  // of hanging. Deauth/portal run on 2.4 GHz on this hardware regardless.
+  if (this->set_channel >= 1 && this->set_channel <= 14) {
+    esp_wifi_set_channel(this->set_channel, WIFI_SECOND_CHAN_NONE);
+  }
   delay(1);
   #ifdef HAS_SCREEN
     #if defined(HAS_ILI9341) || (defined(MARAUDER_MINI_V3) && !defined(DUAL_MINI_C5)) || \
