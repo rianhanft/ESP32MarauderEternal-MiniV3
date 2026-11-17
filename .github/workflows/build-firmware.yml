@@ -13,6 +13,8 @@ on:
       - "scripts/package_release.py"
       - "scripts/test-native.sh"
       - "tests/native/**"
+      - "tests/python/**"
+      - "tools/Remote.py"
       - "release/manifest.json"
       - "release/SHA256SUMS"
       - "VERSION"
@@ -24,6 +26,8 @@ on:
       - "scripts/build.sh"
       - "scripts/test-native.sh"
       - "tests/native/**"
+      - "tests/python/**"
+      - "tools/Remote.py"
       - "VERSION"
       - ".github/workflows/build-firmware.yml"
 

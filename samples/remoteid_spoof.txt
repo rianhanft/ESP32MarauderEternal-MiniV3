@@ -1,0 +1,54 @@
+# ============================================================
+#  ESP32 Marauder Eternal - Remote ID spoof definition
+# ============================================================
+#  Copy this file to the ROOT of your SD card, named exactly:
+#      remoteid_spoof.txt
+#  Then on the device:  NyanBox -> Attacks -> Drone Spoof (SD)
+#
+#  AUTHORIZED TESTING ONLY. Use test identifiers and a location
+#  you are permitted to broadcast in (for example, testing your
+#  own drone-detection equipment on your own bench or range).
+#
+#  Lines starting with # are comments. Format is:  key = value
+#  Keep comments on their own lines, not after a value.
+# ============================================================
+
+# ---- Transmitter / identity (Basic ID message) ----
+# Spoof source MAC, used for both the BLE and WiFi broadcasts.
+mac = AA:BB:CC:DD:EE:01
+# id_type: 1 = CTA-2063-A serial number, 2 = CAA registration ID
+id_type = 1
+# ua_type: 1 = aeroplane, 2 = multirotor, 3 = helicopter, 4 = gyroplane
+ua_type = 2
+# The drone's broadcast ID string (max 20 characters)
+uas_id = MARAUDER-TEST-0001
+
+# ---- Drone position (Location message) ----
+# CHANGE these to your own authorized test location.
+latitude = 40.000000
+longitude = -105.000000
+# Altitude above the WGS-84 ellipsoid, in meters
+altitude_m = 120
+# Height above the takeoff point, in meters
+height_m = 100
+# Ground speed, meters/second
+speed_mps = 8
+# Vertical speed, meters/second (+ up, - down)
+vspeed_mps = 0
+# Heading, 0-359 degrees
+direction_deg = 90
+# Operational status: 1 = ground, 2 = airborne
+status = 2
+
+# ---- Operator info (System + Operator ID messages) ----
+# Delete this whole block to broadcast only Basic ID + Location.
+operator_id = TEST-OPERATOR-01
+operator_latitude = 40.000500
+operator_longitude = -105.000500
+operator_altitude_m = 15
+
+# ---- Broadcast options ----
+# WiFi channel for the beacon frames (1-13 for 2.4 GHz)
+channel = 6
+# methods: 1 = WiFi only, 2 = BLE only, 3 = both
+methods = 3

@@ -1,0 +1,481 @@
+#pragma once
+
+#ifndef MenuFunctions_h
+#define MenuFunctions_h
+
+#include "configs.h"
+
+#if defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV) || defined(HAS_FACES_KEYBOARD)
+  #include "Keyboard.h"
+#endif
+
+#ifdef HAS_TOUCH
+  #include "TouchKeyboard.h"
+#endif
+
+#ifdef HAS_SCREEN
+
+#define BATTERY_ANALOG_ON 0
+
+#include "WiFiScan.h"
+#include "ReconMission.h"
+#include "TargetListSort.h"
+#include "BatteryInterface.h"
+#include "SDInterface.h"
+#include "settings.h"
+#include "MenuInputRepeat.h"
+
+#ifdef HAS_BUTTONS
+  #include "Switches.h"
+  #if (U_BTN >= 0)
+    extern Switches u_btn;
+  #endif
+  #if (D_BTN >= 0)
+    extern Switches d_btn;
+  #endif
+  #if (L_BTN >= 0)
+    extern Switches l_btn;
+  #endif
+  #if (R_BTN >= 0)
+    extern Switches r_btn;
+  #endif
+  #if (C_BTN >= 0)
+    extern Switches c_btn;
+  #endif
+  #ifdef MARAUDER_POOM
+    extern Switches b_btn;
+  #endif
+#endif
+
+extern WiFiScan wifi_scan_obj;
+extern ReconMission recon_obj;
+extern SDInterface sd_obj;
+// #ifdef HAS_BATTERY
+extern BatteryInterface battery_obj;
+// #endif
+extern Settings settings_obj;
+
+#define FLASH_BUTTON 0
+
+#if BATTERY_ANALOG_ON == 1
+#define BATTERY_PIN 13
+#define ANALOG_PIN 34
+#define CHARGING_PIN 27
+#endif
+
+// Icon definitions
+#define ATTACKS 0
+#define BEACON_SNIFF 1
+#define BLUETOOTH 2
+#define BLUETOOTH_SNIFF 3
+#define DEAUTH_SNIFF 4
+#define DRAW 5
+#define PACKET_MONITOR 6
+#define PROBE_SNIFF 7
+#define SCANNERS 8
+#define CC_SKIMMERS 9
+#define SNIFFERS 10
+#define WIFI 11
+#define BEACON_SPAM 12
+#define RICK_ROLL 13
+#define REBOOT 14
+#define GENERAL_APPS 15
+#define UPDATE 16
+#define DEVICE 17
+#define DEVICE_INFO 18
+#define SD_UPDATE 19
+#define WEB_UPDATE 20
+#define EAPOL 21
+#define STATUS_BAT 22
+#define STATUS_SD 23
+#define PWNAGOTCHI 24
+#define SHUTDOWN 25
+#define BEACON_LIST 26
+#define GENERATE 27
+#define CLEAR_ICO 28
+#define KEYBOARD_ICO 29
+#define JOIN_WIFI 30
+#define LANGUAGE 31
+#define STATUS_GPS 32
+#define GPS_MENU 33
+#define DISABLE_TOUCH 34
+#define FLIPPER 35
+#define BLANK 36
+#define PINESCAN_SNIFF 37 // Use blanks icon
+#define MULTISSID_SNIFF 37 // Use blanks icon
+#define JOINED 38
+#define FORCE 39
+#define FUNNY_BEACON 40
+#define FLOCK 41
+#define BRIGHTNESS 42
+#define SETTINGS 43
+
+struct Menu;
+
+enum class MenuBuildKind : uint8_t {
+  EAGER,
+  MAIN,
+  RECON,
+  WIFI_ROOT,
+  BLUETOOTH_ROOT,
+  DEVICE_ROOT,
+  GPS_ROOT,
+  WIFI_SCANNER,
+  WIFI_SNIFFER,
+  WIFI_ATTACK,
+  WIFI_GENERAL,
+  BLUETOOTH_SNIFFER,
+  BLUETOOTH_ATTACK,
+  // NyanBox: consolidated Marauder Eternal features, grouped by category.
+  NYANBOX_ROOT,
+  NYANBOX_SNIFFERS,
+  NYANBOX_ATTACKS,
+  NYANBOX_BLE,
+};
+
+// Individual Nodes of a menu
+
+struct MenuNode {
+  String name;
+  bool command;
+  uint8_t color;
+  uint8_t icon;
+  bool selected;
+  std::function<void()> callable;
+};
+
+// Full Menus
+struct Menu {
+  String name;
+  LinkedList<MenuNode>* list = nullptr;
+  Menu                * parentMenu = nullptr;
+  uint16_t               selected = 0;
+  MenuBuildKind          buildKind = MenuBuildKind::EAGER;
+};
+
+
+class MenuFunctions
+{
+  private:
+
+    enum class FoxHuntListKind : uint8_t {
+      AP_TARGETS,
+      APS_WITH_STATIONS,
+      STATION_TARGETS,
+      PINEAPPLE_TARGETS,
+      MULTISSID_TARGETS,
+      BLE_TARGETS,
+      FINDMY_TARGETS,
+      FLIPPER_TARGETS,
+      IBEACON_TARGETS,
+      META_TARGETS,
+      FLOCK_TARGETS,
+    };
+
+    String u_result = "";
+
+
+    float _graph_scale = 1.0;
+    uint32_t initTime = 0;
+    int menu_start_index = 0;
+    // Single-button (BOOT) navigation state: tracks one press span so a short
+    // tap can advance the cursor and a hold can select, from one button.
+    bool sb_pressing = false;
+    bool sb_hold_fired = false;
+    uint8_t mini_kb_index = 0;
+    uint8_t old_gps_sat_count = 0;
+    uint8_t max_graph_value = 0;
+    Menu* marquee_menu = nullptr;
+    uint16_t marquee_selected = 0xFFFF;
+    uint16_t marquee_rendered_offset = 0;
+    uint16_t marquee_max_offset = 0;
+    uint32_t marquee_selected_since = 0;
+    MenuInputRepeat menu_up_repeat;
+    MenuInputRepeat menu_down_repeat;
+    MenuInputRepeat menu_touch_up_repeat;
+    MenuInputRepeat menu_touch_down_repeat;
+    int8_t menu_touch_button = -1;
+
+    void buildWiFiFoxHuntMenu();
+    void buildBluetoothFoxHuntMenu();
+    void buildFoxTargetList(FoxHuntListKind type, int context_ap = -1);
+    void buildFoxSortMenu();
+    void buildFoxFilterMenu();
+    const char* foxSortLabel() const;
+    const char* foxFilterLabel() const;
+    bool foxListSupportsRecent() const;
+    bool foxListSupportsBand() const;
+
+    FoxHuntListKind fox_target_list = FoxHuntListKind::AP_TARGETS;
+    int fox_target_context_ap = -1;
+    TargetSortMode fox_sort_mode = TargetSortMode::SIGNAL_DESC;
+    TargetFilterMode fox_filter_mode = TargetFilterMode::ALL;
+
+    // --- Guided attack workflow (v1.20-style: Choose Targets -> Review -> Start) --
+    // Wraps the on-device WiFi > Attacks menu so an attack first collects the
+    // targets it needs, then shows a Review screen whose "Start Attack" row only
+    // appears when the plan is valid. The serial `attack` command is untouched and
+    // keeps its legacy selected-list behavior.
+    enum class AttackScope : uint8_t {
+      TARGETLESS,   // Random / Funny / Rick Roll / Probe flood - no retained list
+      AP,           // AP-targeted (CSA, Quiet, SAE, AP spam, targeted variants)
+      SSID_LIST,    // Beacon Spam List - retained user SSIDs
+      SSID_ONE,     // Evil Portal / Karma - one explicit SSID
+      AP_STATIONS,  // Deauth / Bad Msg / Assoc Sleep - per-AP station profiles
+    };
+    struct AttackPlan {
+      String name;                          // display name shown on Review
+      uint8_t color = TFTRED;               // menu palette index for the attack
+      AttackScope scope = AttackScope::TARGETLESS;
+      String oneSsid;                       // chosen SSID for SSID_ONE
+      int oneApIndex = -1;                  // chosen scanned-AP index for Evil Portal (-1 = SSID)
+      bool needsHtml = false;               // Evil Portal: a captive-page HTML must be chosen
+      std::function<void()> launch;         // performs the real StartScan (legacy path)
+      std::function<void()> reopenTargets;  // re-enter the target step from Review
+    };
+    AttackPlan attack_plan;
+    // Menu the guided workflow returns to (Back / after launch). Defaults to the
+    // WiFi Attacks menu, but e.g. the EAPOL/PMKID scan sets it to the Sniffers
+    // menu so it does not dump the user into Attacks.
+    Menu* attack_origin_menu = nullptr;
+
+    void beginAttackPlan(const String& name, uint8_t color, AttackScope scope,
+                         std::function<void()> launch, Menu* origin = nullptr);
+    void buildAttackTargets();              // "Choose Targets" (AP / SSID multi-select)
+    void buildAttackSsidSelect();           // "Select by SSID": add every AP of one SSID
+    void buildAttackHtmlSelect();           // Evil Portal: pick the captive-page HTML file
+    void buildAttackTargetMode();           // "Target Mode": Broadcast / All / Pick / Remove
+    void buildAttackPickStations();         // "Pick Stations": per-client multi-select
+    void setSelectedApStations(bool selected);  // (de)select every client of in-profile APs
+    void buildAttackReview();               // "Review Attack" (+ conditional Start)
+    uint16_t attackTargetCount() const;     // # selected APs / SSIDs for the plan
+    bool attackPlanValid() const;
+
+    // Main menu stuff
+    Menu mainMenu;
+    Menu reconMenu;
+
+    Menu wifiMenu;
+    Menu bluetoothMenu;
+    #ifdef HAS_GPS
+      Menu gpsMenu;   // H4W9 Added GPS Menu option to Main Menu
+    #endif
+    Menu badusbMenu;
+    Menu deviceMenu;
+    Menu bleConfirmMenu;   // Ported from Marauder Eternal: authorize-action confirm screen
+    // NyanBox: top-level menu consolidating the ported Marauder Eternal features.
+    Menu nyanBoxMenu;
+    Menu nyanSnifferMenu;
+    Menu nyanAttackMenu;
+    Menu nyanBleMenu;
+
+    // Device menu stuff
+    //Menu whichUpdateMenu;
+    Menu failedUpdateMenu;
+    Menu confirmMenu;
+    Menu updateMenu;
+    Menu settingsMenu;
+    Menu specSettingMenu;
+    Menu geofenceMenu;
+    Menu geofenceActionMenu;
+    #ifdef HAS_MINI_SCREEN
+      Menu geofenceRadiusMenu;
+      GeofenceConfig pendingGeofence;
+      uint8_t pendingGeofenceSlot = 0;
+      bool geofenceMenuRefreshPending = false;
+    #endif
+    uint8_t selectedGeofence = 0;
+    //Menu languageMenu;
+    Menu sdDeleteMenu;
+    LinkedList<SDDirectoryEntry>* sd_browser_entries = nullptr;
+    LinkedList<String>* sd_delete_selection = nullptr;
+    String sd_browser_path = "/";
+    bool sd_browser_release_pending = false;
+    bool saved_wifi_release_pending = false;
+    void ensureSDDeleteBrowserResources();
+    void releaseSDDeleteBrowserResources();
+
+    // WiFi menu stuff
+    Menu wifiSnifferMenu;
+    Menu wifiScannerMenu;
+    Menu wifiAttackMenu;
+    Menu attackTargetsMenu;   // guided workflow: "Choose Targets"
+    Menu attackReviewMenu;    // guided workflow: "Review Attack"
+    Menu attackStationMenu;   // guided workflow: "Target Mode" (Broadcast/All/Pick/Remove)
+    Menu attackPickMenu;      // guided workflow: "Pick Stations" (per-client toggles)
+    Menu attackSsidMenu;      // guided workflow: "Select by SSID"
+    /*#ifdef HAS_GPS
+      Menu wardrivingMenu;
+    #endif*/
+    Menu wifiGeneralMenu;
+    Menu wifiAPMenu;
+    Menu savedWifiMenu;
+    Menu wifiIPMenu;
+    Menu ssidsMenu;
+    //#ifdef HAS_BT
+    //  Menu airtagMenu;
+    //#endif
+    //#ifndef HAS_ILI9341
+      Menu wifiStationMenu;
+    //#endif
+
+    // WiFi General Menu
+    Menu htmlMenu;
+    Menu miniKbMenu;
+    Menu saveFileMenu;
+    Menu genAPMacMenu;
+    Menu cloneAPMacMenu;
+    Menu setMacMenu;
+    Menu selectProbeSSIDsMenu;
+
+    // Bluetooth menu stuff
+    Menu bluetoothSnifferMenu;
+    Menu bluetoothAttackMenu;
+    Menu iBeaconMenu;
+    Menu iBeaconInfoMenu;
+    Menu remoteIdMenu;
+
+    // Settings things menus
+    Menu generateSSIDsMenu;
+
+    Menu evilPortalMenu;
+
+    Menu foxHuntMenu;
+    Menu foxSortMenu;
+    Menu foxFilterMenu;
+
+    #ifdef HAS_DIRECT_UPLOAD
+      Menu deleteAllMenu;
+      Menu uploadAllMenu;
+    #endif
+
+    //static void lv_tick_handler();
+
+    // Menu icons
+
+    void buildUploadFileMenu();
+    void setupSDFileList(bool update = false);
+    void buildSDFileMenu(bool update = false);
+    void buildSavedWifiMenu(bool replace_mode = false);
+    void buildGeofenceMenu();
+    void buildGeofenceActionMenu(uint8_t slot);
+    String geofenceTextInput(const char* title);
+    bool editGeofence(uint8_t slot, bool use_current_location);
+    #ifdef HAS_MINI_SCREEN
+      void beginMiniGeofenceEdit(uint8_t slot, bool use_current_location);
+      void buildGeofenceRadiusMenu(uint8_t slot, const GeofenceConfig& fence);
+      void deferGeofenceMenuRefresh();
+    #endif
+    void releaseSavedWifiMenu();
+    void buildSDDeleteBrowser(const String& path, bool reset_selection = false);
+    void toggleSDDeleteSelection(const String& path);
+    bool isSDFileSelected(const String& path) const;
+    String parentSDPath(const String& path) const;
+    void displayMenuButtons();
+    uint16_t getColor(uint16_t color);
+    void drawAvgLine(int16_t value);
+    void drawMaxLine(int16_t value, uint16_t color);
+    void drawMaxLine(uint8_t value, uint16_t color);
+    float calculateGraphScale(int16_t value);
+    float calculateGraphScale(uint8_t value);
+    float graphScaleCheck(const int16_t array[TFT_WIDTH]);
+    #ifndef HAS_DUAL_BAND
+      float graphScaleCheckSmall(const uint8_t array[MAX_CHANNEL]);
+    #else
+      float graphScaleCheckSmall(const uint8_t array[DUAL_BAND_CHANNELS]);
+    #endif
+    void drawGraph(int16_t *values);
+    void drawGraphSmall(uint8_t *values);
+    void renderGraphUI(uint8_t scan_mode = 0);
+    void addNodes(Menu* menu, const char* name, uint8_t color, int place, std::function<void()> callable, bool selected = false);
+    void buildLazyMenu(Menu* menu);
+    void buildWiFiGeneralMenu();
+    #ifdef HAS_BT
+      void buildBluetoothAttackMenu();
+    #endif
+    bool wifi_general_dependents_initialized = false;
+    void releaseLazyMenu(Menu* menu);
+    Menu* lazy_menu_release_pending = nullptr;
+    void battery(bool initial = false);
+    void battery2(bool initial = false);
+    const char* callSetting(const char* key);
+    void displaySetting(const char* key, Menu* menu, int index);
+    void buttonSelected(int b, int x = -1, uint16_t text_offset = 0);
+    void buttonNotSelected(int b, int x = -1);
+    String menuLabelWindow(const String& name, uint16_t offset = 0);
+    uint16_t menuLabelMaxOffset(const String& name);
+    void updateMenuMarquee(uint32_t current_time);
+    #ifdef HAS_MINI_SCREEN
+      void drawMiniMenuButton(int b, int x, bool selected, uint16_t text_offset = 0);
+    #endif
+    //#if (!defined(HAS_ILI9341) && defined(HAS_BUTTONS))
+    #ifdef HAS_MINI_KB
+      String miniKeyboard(Menu * targetMenu, bool do_pass = false);
+    #endif
+    //#endif
+
+    #if defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV) || defined(HAS_FACES_KEYBOARD)
+      void updateKeyboard();
+      bool isKeyPressed(char c);
+    #endif
+
+    #if defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV) || defined(HAS_FACES_KEYBOARD) || defined(HAS_TOUCH)
+      bool textInput(char *buffer, size_t bufLen, const char *title);
+    #endif
+
+  public:
+    Menu* current_menu;
+    Menu clearSSIDsMenu;
+    Menu clearAPsMenu;
+    
+    // Save Files Menu
+    Menu saveSSIDsMenu;
+    Menu loadSSIDsMenu;
+    Menu saveAPsMenu;
+    Menu loadAPsMenu;
+    Menu saveATsMenu;
+    Menu loadATsMenu;
+
+    #ifdef HAS_GPS
+      // GPS Menu
+      Menu gpsInfoMenu;
+      Menu gpsPOIMenu;
+    #endif
+
+    Menu infoMenu;
+    Menu apInfoMenu;
+
+    #ifdef HAS_DIRECT_UPLOAD
+      Menu uploadLogsMenu;
+      Menu actionMenu;
+    #endif
+
+    //Ticker tick;
+
+    uint16_t x = -1, y = -1;
+    boolean pressed = false;
+
+    bool disable_touch;
+
+    String loaded_file = "";
+
+    void setGraphScale(float scale);
+    void updateStatusBar();
+    void buildButtons(Menu* menu, int starting_index = 0, const char* button_name = nullptr);
+    void changeMenu(Menu* menu, bool simple_change = false);
+    // Ported from Marauder Eternal: show a Cancel / Run(Authorized) confirm
+    // screen, run `action` on confirm, then return to `returnMenu`.
+    void confirmAction(const char* title, Menu* returnMenu, std::function<void()> action);
+    void drawStatusBar();
+    void displayCurrentMenu(int start_index = 0);
+    #ifndef HAS_MINI_SCREEN
+      void brightnessMode();
+    #endif
+    void main(uint32_t currentTime);
+    void RunSetup();
+    void orientDisplay();
+};
+
+
+#endif
+#endif

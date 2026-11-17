@@ -43,3 +43,15 @@ Apache License, Version 2.0. A copy of the license is available at
 The Marauder adaptation adds fixed-memory storage, strict transport bounds,
 NimBLE-Arduino 2.x integration, ESP32-C5 Wi-Fi/BLE coexistence, channel
 hopping, and a 128x128 joystick-driven display.
+
+## APA102 (Pololu)
+
+The LilyGo T-Dongle C5 target drives its onboard APA102 RGB LED with the
+Pololu APA102 Arduino library, vendored at `libraries/APA102/`
+(from [pololu/apa102-arduino](https://github.com/pololu/apa102-arduino)).
+
+MIT License
+
+Copyright (c) 2015-2020 Pololu Corporation (www.pololu.com)
+
+The full license text is in `libraries/APA102/LICENSE.txt`.
