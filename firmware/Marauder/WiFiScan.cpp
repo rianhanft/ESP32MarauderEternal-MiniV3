@@ -3188,9 +3188,23 @@ void WiFiScan::startWiFiAttacks(uint8_t scan_mode, uint16_t color, const char* t
   //wifi_ap_config_t ap_config;
   //ap_config.ssid_hidden = 1;
 
+  // Clear the whole struct first. The ESP32-C5 soft-AP is strict: stale garbage
+  // left in channel/authmode/max_connection makes esp_wifi_set_config() reject
+  // with ESP_ERR_INVALID_ARG, and that failure (previously unchecked) is what
+  // left the attack screen BLACK with no frames transmitted.
+  memset(&ap_config, 0, sizeof(ap_config));
   ap_config.ap.ssid_hidden = 1;
   ap_config.ap.beacon_interval = 10000;
   ap_config.ap.ssid_len = 0;
+  // The C5 has a SINGLE radio: tuning a 5 GHz channel during an attack hangs it,
+  // and it rejects a 5 GHz / invalid soft-AP channel. Clamp the attack to a 2.4
+  // GHz channel (deauth/AP targets on this hardware are 2.4 GHz); fall back to
+  // channel 1 if a previous dual-band SCAN left set_channel on a 5 GHz channel.
+  uint8_t attack_channel = this->set_channel;
+  if (attack_channel < 1 || attack_channel > 13) attack_channel = 1;
+  ap_config.ap.channel = attack_channel;
+  ap_config.ap.authmode = WIFI_AUTH_OPEN;
+  ap_config.ap.max_connection = 1;
 
   if (scan_mode == WIFI_ATTACK_SAE_COMMIT) {
     this->initMbedtls();
@@ -3207,27 +3221,65 @@ void WiFiScan::startWiFiAttacks(uint8_t scan_mode, uint16_t color, const char* t
   this->hud_view = 0;
   this->hud_view_ms = millis();
   this->hud_needs_clear = true;
-  // Use the lean cfg2 profile -- the SAME one RunDeauthScan (the deauth sniffer)
-  // uses and which works on the Mini. The heavy default cfg can fail to allocate
-  // on the ESP32-C5's smaller internal heap, and the failure was unchecked, so the
-  // attack hung with a black screen and no frames went out. NB: just swap the
-  // profile -- do NOT add a deinit/retry (that tore down the running driver and
-  // crashed last time).
-  esp_wifi_init(&cfg2);
+  // Lean cfg2 profile -- the SAME one RunDeauthScan (the working deauth sniffer)
+  // uses on the Mini. Every call below is now CHECKED: on the C5 a silent failure
+  // in this sequence is exactly what left the attack screen black with no frames.
+  // On any failure we tear the driver down and show "WiFi start failed: <stage>"
+  // so the device is recoverable (Stop + retry) instead of hanging on black.
+  esp_err_t status;
+  auto fail_start = [this](const char* stage, esp_err_t st) -> bool {
+    if (st == ESP_OK) return false;
+    Serial.printf("[WiFi Attack] %s failed: %s\n", stage, esp_err_to_name(st));
+    esp_wifi_set_promiscuous(false);
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    this->wifi_initialized = false;
+    #ifdef HAS_SCREEN
+      display_obj.tft.setTextColor(TFT_RED, TFT_BLACK);
+      display_obj.showCenterText("WiFi start failed", STATUS_BAR_WIDTH + 20, true);
+      display_obj.tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+      display_obj.showCenterText(stage, STATUS_BAR_WIDTH + 34, true);
+      display_obj.showCenterText(esp_err_to_name(st), STATUS_BAR_WIDTH + 48, true);
+    #endif
+    return true;
+  };
+
+  status = esp_wifi_init(&cfg2);
+  if (status == ESP_ERR_WIFI_INIT_STATE) {
+    // Driver already up (coming straight from a scan without a teardown). This
+    // is the ONLY safe place to deinit -- the driver genuinely IS initialized --
+    // so tear it down and retry once rather than failing/hanging.
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    delay(75);
+    status = esp_wifi_init(&cfg2);
+  }
+  if (fail_start("Driver init", status)) return;
+  this->wifi_initialized = true;
   #ifdef HAS_IDF_3
     esp_wifi_set_country(&country);
   #endif
-  esp_wifi_set_storage(WIFI_STORAGE_RAM);
+  status = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+  if (fail_start("Storage config", status)) return;
   if (scan_mode != WIFI_ATTACK_SAE_COMMIT) {
-    esp_wifi_set_mode(WIFI_MODE_AP);
-    esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+    status = esp_wifi_set_mode(WIFI_MODE_AP);
+    if (fail_start("AP mode", status)) return;
+    status = esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+    if (fail_start("AP config", status)) return;
   }
   else {
-    esp_wifi_set_mode(WIFI_MODE_STA);
+    status = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (fail_start("STA mode", status)) return;
   }
-  esp_wifi_start();
+  status = esp_wifi_start();
+  if (fail_start("Driver start", status)) return;
   this->setMac();
-  this->changeChannel(this->set_channel);
+  // Tune the VALIDATED 2.4 GHz channel directly. NOT changeChannel(set_channel),
+  // which would re-tune whatever (possibly 5 GHz) channel a prior scan left and
+  // hang the single radio.
+  status = esp_wifi_set_channel(ap_config.ap.channel, WIFI_SECOND_CHAN_NONE);
+  if (fail_start("Channel config", status)) return;
+  this->set_channel = ap_config.ap.channel;
   esp_wifi_set_promiscuous(true);
   esp_wifi_set_max_tx_power(82);
   this->wifi_initialized = true;
@@ -4566,7 +4618,16 @@ void WiFiScan::RunEvilPortal(uint8_t scan_mode, uint16_t color) {
   // early WITHOUT deiniting the radio, so the softAP lingers and the next scan
   // receives nothing. Letting Arduino own the whole softAP lifecycle is what lets
   // cleanup() tear the radio fully down so scans work again afterward.
-  evil_portal_obj.begin(ssids, access_points);
+  if (!evil_portal_obj.begin(ssids, access_points)) {
+    // Surface a failed bring-up (no HTML, SD error, softAP refused) instead of
+    // leaving a frozen/black screen with no clue what went wrong.
+    #ifdef HAS_SCREEN
+      display_obj.tft.setTextColor(TFT_RED, TFT_BLACK);
+      display_obj.showCenterText("Portal start failed", STATUS_BAR_WIDTH + 24, true);
+      display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      display_obj.showCenterText("Stop and retry", STATUS_BAR_WIDTH + 40, true);
+    #endif
+  }
   this->wifi_initialized = true;
   initTime = millis();
 }
@@ -13767,9 +13828,15 @@ void WiFiScan::main(uint32_t currentTime)
       }
     }
 
-    if (evil_portal_obj.ap_index > -1)
-      this->changeChannel(access_points->get(evil_portal_obj.ap_index).channel);
-    
+    if (evil_portal_obj.ap_index > -1) {
+      // C5 single radio: re-tuning to a 5 GHz channel here hangs it on every loop
+      // iteration -> frozen/black portal screen. Only follow a 2.4 GHz cloned
+      // channel; a 5 GHz clone stays on the softAP's own 2.4 GHz channel.
+      uint8_t ep_chan = access_points->get(evil_portal_obj.ap_index).channel;
+      if (ep_chan >= 1 && ep_chan <= 13)
+        this->changeChannel(ep_chan);
+    }
+
     evil_portal_obj.main(currentScanMode);
   }
   else if (currentScanMode == WIFI_PACKET_MONITOR)

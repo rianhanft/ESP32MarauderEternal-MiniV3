@@ -586,7 +586,11 @@ void EvilPortal::setTargetAP(int index, uint8_t channel) {
   }
 
   this->ap_index = index;
-  this->target_ap_channel = channel;
+  // The ESP32-C5 has a SINGLE radio: hosting a softAP on a 5 GHz channel fails,
+  // and tuning one hangs the radio -> black/frozen portal screen. Clone only a
+  // 2.4 GHz channel; fall back to ch 1 for a 5 GHz target so the portal still
+  // comes up solid (the C5 cannot host a 5 GHz softAP anyway).
+  this->target_ap_channel = (channel >= 1 && channel <= 13) ? channel : 1;
 }
 
 int EvilPortal::getTargetAPIndex() const {
