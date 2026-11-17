@@ -3207,7 +3207,13 @@ void WiFiScan::startWiFiAttacks(uint8_t scan_mode, uint16_t color, const char* t
   this->hud_view = 0;
   this->hud_view_ms = millis();
   this->hud_needs_clear = true;
-  esp_wifi_init(&cfg);
+  // Use the lean cfg2 profile -- the SAME one RunDeauthScan (the deauth sniffer)
+  // uses and which works on the Mini. The heavy default cfg can fail to allocate
+  // on the ESP32-C5's smaller internal heap, and the failure was unchecked, so the
+  // attack hung with a black screen and no frames went out. NB: just swap the
+  // profile -- do NOT add a deinit/retry (that tore down the running driver and
+  // crashed last time).
+  esp_wifi_init(&cfg2);
   #ifdef HAS_IDF_3
     esp_wifi_set_country(&country);
   #endif
