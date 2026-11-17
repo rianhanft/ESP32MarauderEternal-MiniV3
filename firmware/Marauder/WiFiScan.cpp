@@ -11493,28 +11493,6 @@ void WiFiScan::drawCameraDeauthStatus() {
 void WiFiScan::changeChannel(int chan) {
   if (chan != -1)
     this->set_channel = chan;
-  #if defined(SOC_WIFI_SUPPORT_5G) && SOC_WIFI_SUPPORT_5G
-    // The ESP32-C5 has a single radio and can only be on one band at a time, so a
-    // 5 GHz channel only tunes while the band mode allows 5 GHz -- otherwise
-    // esp_wifi_set_channel() can't switch bands and the sweep sticks (e.g. on
-    // channel 153). Switch the band to match the channel, but ONLY when it
-    // actually changes: a band switch recalibrates the radio, so doing it on every
-    // 2.4 GHz hop would crawl. Because dual_band_channels is ordered (2.4 then 5),
-    // this fires at most twice per full sweep. A band switch can drop promiscuous
-    // RX, so restore it if it was on.
-    static int s_cur_band = -1;            // 0 = 2.4 GHz, 1 = 5 GHz, -1 = unknown
-    const int want_band = (this->set_channel > 14) ? 1 : 0;
-    if (want_band != s_cur_band) {
-      bool was_promisc = false;
-      esp_wifi_get_promiscuous(&was_promisc);
-      esp_wifi_set_band_mode(want_band ? WIFI_BAND_MODE_5G_ONLY
-                                       : WIFI_BAND_MODE_2G_ONLY);
-      if (was_promisc)
-        esp_wifi_set_promiscuous(true);
-      s_cur_band = want_band;
-      delay(10);                           // let the radio settle on the new band
-    }
-  #endif
   esp_wifi_set_channel(this->set_channel, WIFI_SECOND_CHAN_NONE);
   delay(1);
   #ifdef HAS_SCREEN
@@ -11573,12 +11551,8 @@ void WiFiScan::channelHop(bool filtered, bool ranged) {
         bot_chan = (activity_page * CHAN_PER_PAGE) - CHAN_PER_PAGE;
       }
       else {
-        // Full dual-band sweep. dual_band_channels is ordered (all 2.4 GHz then
-        // all 5 GHz), so the band changes at most twice per sweep; changeChannel()
-        // switches the C5's single radio to the band that matches each channel on
-        // those crossings, so 5 GHz channels tune instead of sticking (e.g. 153).
-        // (DUAL_BAND_CHANNELS - 1 is the last valid index; the old code used
-        // DUAL_BAND_CHANNELS and read one past the end of the array.)
+        // Full dual-band sweep (2.4 + 5 GHz), matching the Eternal scan. (-1 is the
+        // last valid index; the old code read one past the array end.)
         top_chan = DUAL_BAND_CHANNELS - 1;
         bot_chan = 0;
       }

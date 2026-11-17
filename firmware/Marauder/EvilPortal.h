@@ -3,12 +3,15 @@
 #ifndef EvilPortal_h
 #define EvilPortal_h
 
-#include <esp_http_server.h>
+#include "ESPAsyncWebServer.h"
+#include <AsyncTCP.h>
 #include <DNSServer.h>
 #include <WiFi.h>
 
 #include "configs.h"
 #include "settings.h"
+#include "RsnCapabilities.h"
+#include "StoragePaths.h"
 #ifdef HAS_SCREEN
   #include "Display.h"
   #include <LinkedList.h>
@@ -33,18 +36,23 @@ extern Buffer buffer_obj;
 #define RESET_CMD "reset"
 #define START_CMD "start"
 #define ACK_CMD "ack"
-#define MAX_AP_NAME_SIZE 32
+#define MAX_AP_NAME_SIZE 33
 #define WIFI_SCAN_EVIL_PORTAL 30
 
 extern char apName[MAX_AP_NAME_SIZE];
 
-extern char* index_html;
+#ifndef HAS_PSRAM
+  extern char index_html[MAX_HTML_SIZE];
+#else
+  extern char* index_html;
+#endif
 
 struct ssid {
   String essid;
   uint8_t channel;
   uint8_t bssid[6];
   bool selected;
+  bool persistent = false;
 };
 
 struct AccessPoint {
@@ -55,7 +63,7 @@ struct AccessPoint {
  // LinkedList<char>* beacon;
   char beacon[2];
   int8_t rssi;
-  LinkedList<uint16_t>* stations;
+  LinkedList<uint16_t>* stations = nullptr;
   uint16_t packets;
   uint8_t sec;
   bool wps;
@@ -64,7 +72,35 @@ struct AccessPoint {
   bool has_msg_2;
   bool has_msg_3;
   bool has_msg_4;
-  uint32_t last_seen_ms;
+  PmfStatus pmf_status = PMF_STATUS_UNKNOWN;
+  uint32_t last_seen_ms = 0;
+};
+
+struct PortalCredential {
+  uint32_t captured_at_ms;
+  String ssid;
+  String username;
+  String password;
+};
+
+class CaptiveRequestHandler : public AsyncWebHandler {
+public:
+  CaptiveRequestHandler() {}
+  virtual ~CaptiveRequestHandler() {}
+
+  bool canHandle(AsyncWebServerRequest *request) { return true; }
+
+  void handleRequest(AsyncWebServerRequest *request) {
+    #ifdef HAS_PSRAM
+      if (index_html == nullptr) {
+        request->send(503, "text/plain", "Portal content is not loaded");
+        return;
+      }
+      request->send(200, "text/html", index_html);
+    #else
+      request->send_P(200, "text/html", index_html);
+    #endif
+  }
 };
 
 class EvilPortal {
@@ -78,6 +114,8 @@ class EvilPortal {
     String password;
 
     bool has_html;
+    uint8_t target_ap_channel = 1;
+    int session_credential_count = 0;
 
     DNSServer dnsServer;
 
@@ -86,13 +124,15 @@ class EvilPortal {
     bool setHtml();
     bool setAP(LinkedList<ssid>* ssids, LinkedList<AccessPoint>* access_points);
     void setupServer();
-    void startPortal();
-    void startAP();
+    bool startPortal();
+    bool startAP();
     void sendToDisplay(String msg);
+    void loadCredentials();
+    bool storeCredential(const String& username, const String& password);
+    bool installHtml(const char* html, size_t length);
 
   public:
-    int ap_index = -1;
-
+    int ap_index = -1;              // index of the AP being cloned (set by the menu/CLI)
     String target_html_name = "index.html";
     uint8_t selected_html_index = 0;
 
@@ -100,34 +140,29 @@ class EvilPortal {
     bool has_ap;
 
     LinkedList<String>* html_files;
-    // Every credential captured this session ("user : pass"), newest last. Shown
-    // as an accumulating list on the portal HUD; capped so it can't grow without
-    // bound (the full history is always written to the SD log).
-    LinkedList<String>* captured_creds = nullptr;
+    LinkedList<PortalCredential>* captured_credentials;
 
     void cleanup();
+    int getCredentialCount();
+    String getCredentialDisplayLabel(int index);
+    const PortalCredential* getCredential(int index);
+    int getSessionCredentialCount();
+    const PortalCredential* getSessionCredential(int index);
+    uint8_t getConnectedClientCount();
+    bool isRunning() const;
+    bool clearCredentials();
     String get_user_name();
     String get_password();
     bool setAP(String essid);
     bool setAPFromConfig();
+    void setTargetAP(int index, uint8_t channel);
+    int getTargetAPIndex() const;
+    uint8_t getTargetAPChannel() const;
     void setup();
+    void refreshHtmlFiles();
     bool begin(LinkedList<ssid>* ssids, LinkedList<AccessPoint>* access_points);
     void main(uint8_t scan_mode);
     void setHtmlFromSerial();
-
-    // Live status HUD (shown while the portal is up).
-    uint32_t num_creds = 0;        // captured credential pairs this session
-    String   last_cred = "";       // most recent captured identity, for display
-    uint32_t portal_start_ms = 0;  // millis() when the portal came up (elapsed)
-    uint32_t portal_ui_ms = 0;     // HUD redraw timer
-    bool     portal_needs_clear = false;  // full-wipe the body on the first frame
-    #ifdef HAS_SCREEN
-      void drawPortalStatus();
-    #endif
-    // Called from the esp_http_server "/get" handler (httpd task context) to
-    // record a captured credential field; main() prints/logs it on the next
-    // pass once both fields have arrived.
-    void onCredentialField(bool is_email, const String& value);
 
 };
 
