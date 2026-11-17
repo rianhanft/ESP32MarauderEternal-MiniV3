@@ -3207,21 +3207,7 @@ void WiFiScan::startWiFiAttacks(uint8_t scan_mode, uint16_t color, const char* t
   this->hud_view = 0;
   this->hud_view_ms = millis();
   this->hud_needs_clear = true;
-  // --- C5-safe attack init (ported from MarauderEternal's attack flow) ---
-  // The default WiFi profile (cfg) reserves large RX/TX/mgmt buffer pools that
-  // esp_wifi_init() can FAIL to allocate on the ESP32-C5 after an AP scan has
-  // retained its results. The old path called esp_wifi_init(&cfg) and never
-  // checked the return, so a failed init left the driver half-up and NO attack
-  // frames actually went out -- which is exactly why deauth/attacks "did
-  // nothing" on the C5 while they work in Eternal. Use the lean cfg2 profile for
-  // raw-injection attacks so the allocation fits, and verify it.
-  esp_err_t _init_st = esp_wifi_init(&cfg2);
-  if (_init_st != ESP_OK) {
-    Serial.printf("[WiFi Attack] esp_wifi_init(lean) failed: %s\n",
-                  esp_err_to_name(_init_st));
-    esp_wifi_deinit();
-    _init_st = esp_wifi_init(&cfg2);
-  }
+  esp_wifi_init(&cfg);
   #ifdef HAS_IDF_3
     esp_wifi_set_country(&country);
   #endif
@@ -3238,11 +3224,6 @@ void WiFiScan::startWiFiAttacks(uint8_t scan_mode, uint16_t color, const char* t
   this->changeChannel(this->set_channel);
   esp_wifi_set_promiscuous(true);
   esp_wifi_set_max_tx_power(82);
-  // C5 TX-side settle: the driver can report "started" before its transmit path
-  // is actually usable after repeated stop/start cycles, and a raw frame
-  // injected immediately is silently dropped. Let it settle before the attack
-  // loop begins (MarauderEternal does the same 75 ms wait).
-  delay(75);
   this->wifi_initialized = true;
   this->setLEDMode(MODE_ATTACK);
   initTime = millis();
