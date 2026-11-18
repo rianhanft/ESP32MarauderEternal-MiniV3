@@ -55,7 +55,7 @@ struct AccessPoint {
  // LinkedList<char>* beacon;
   char beacon[2];
   int8_t rssi;
-  LinkedList<uint16_t>* stations;
+  LinkedList<uint16_t>* stations = nullptr;
   uint16_t packets;
   uint8_t sec;
   bool wps;

