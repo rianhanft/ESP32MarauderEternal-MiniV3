@@ -931,14 +931,19 @@ void Display::scanTitle(const String& title, int32_t x, int32_t y, uint8_t font)
 
 void Display::buildBanner(String msg, int xpos)
 {
+  #if defined(MARAUDER_T_DONGLE_C5)
+    // No title banner on the 160x80 panel: there is no room for it under the
+    // status bar without clipping (it looked like sliced text above every menu),
+    // and the menu rows already show context. Clear the strip so no stale title
+    // lingers and draw nothing -- the menu (KEY_Y) starts right below the bar.
+    this->tft.fillRect(0, STATUS_BAR_WIDTH, SCREEN_WIDTH, TEXT_HEIGHT, TFT_BLACK);
+    return;
+  #endif
+
   int h = TEXT_HEIGHT;
 
   #if defined(MARAUDER_CARDPUTER) || defined(MARAUDER_CARDPUTER_ADV)
     int banner_y = STATUS_BAR_WIDTH + 8;
-  #elif defined(MARAUDER_T_DONGLE_C5)
-    // Drop the title a couple px into the body so its top edge isn't flush
-    // against (and sliced by) the status bar on the short 160x80 panel.
-    int banner_y = STATUS_BAR_WIDTH + 2;
   #else
     int banner_y = STATUS_BAR_WIDTH;
   #endif
