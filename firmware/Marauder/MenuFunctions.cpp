@@ -1455,6 +1455,8 @@ void MenuFunctions::updateStatusBar()
 
     #if defined(MARAUDER_POOM)
       display_obj.tft.drawString("C" + (String)wifi_scan_obj.old_channel, 0, 0, 1);
+    #elif defined(MARAUDER_T_DONGLE_C5)
+      display_obj.tft.drawString("CH:" + (String)wifi_scan_obj.old_channel, 2, 0, 1);
     #elif defined(HAS_MINI_SCREEN)
       display_obj.tft.drawString("CH:" + (String)wifi_scan_obj.old_channel, TFT_WIDTH/4, 0, 1);
     #endif
@@ -1477,6 +1479,8 @@ void MenuFunctions::updateStatusBar()
   #if defined(MARAUDER_POOM)
     display_obj.tft.fillRect(46, 0, 34, STATUS_BAR_WIDTH, STATUSBAR_COLOR);
     display_obj.tft.drawString(String(getDRAMUsagePercent()) + "%", 46, 0, 1);
+  #elif defined(MARAUDER_T_DONGLE_C5)
+    display_obj.tft.drawString(String(getDRAMUsagePercent()) + "%", 60, 0, 1);
   #elif defined(HAS_MINI_SCREEN)
     display_obj.tft.drawString(String(getDRAMUsagePercent()) + "%", TFT_WIDTH/1.75, 0, 1);
   #endif
@@ -1645,6 +1649,11 @@ void MenuFunctions::drawStatusBar()
 
   #if defined(MARAUDER_POOM)
     display_obj.tft.drawString("C" + (String)wifi_scan_obj.old_channel, 0, 0, 1);
+  #elif defined(MARAUDER_T_DONGLE_C5)
+    // 160x80 landscape: spread CH / % / SD across the FULL width. The shared
+    // HAS_MINI_SCREEN layout positions by TFT_WIDTH (80), which crammed them into
+    // the left half so a 3-digit 5 GHz channel collided with the usage %.
+    display_obj.tft.drawString("CH:" + (String)wifi_scan_obj.old_channel, 2, 0, 1);
   #elif defined(HAS_MINI_SCREEN)
     display_obj.tft.drawString("CH:" + (String)wifi_scan_obj.old_channel, TFT_WIDTH/4, 0, 1);
   #endif
@@ -1665,6 +1674,8 @@ void MenuFunctions::drawStatusBar()
   #if defined(MARAUDER_POOM)
     display_obj.tft.fillRect(46, 0, 34, STATUS_BAR_WIDTH, STATUSBAR_COLOR);
     display_obj.tft.drawString(String(getDRAMUsagePercent()) + "%", 46, 0, 1);
+  #elif defined(MARAUDER_T_DONGLE_C5)
+    display_obj.tft.drawString(String(getDRAMUsagePercent()) + "%", 60, 0, 1);
   #elif defined(HAS_MINI_SCREEN)
     display_obj.tft.drawString(String(getDRAMUsagePercent()) + "%", TFT_WIDTH/1.75, 0, 1);
   #endif
@@ -1722,6 +1733,9 @@ void MenuFunctions::drawStatusBar()
   #if defined(MARAUDER_POOM)
     display_obj.tft.setTextColor(the_color, STATUSBAR_COLOR);
     display_obj.tft.drawString("SD", 116, 0, 1);
+  #elif defined(MARAUDER_T_DONGLE_C5)
+    display_obj.tft.setTextColor(the_color, STATUSBAR_COLOR);
+    display_obj.tft.drawString("SD", SCREEN_WIDTH - 20, 0, 1);
   #elif defined(HAS_MINI_SCREEN)
     display_obj.tft.setTextColor(the_color, STATUSBAR_COLOR);
     display_obj.tft.drawString("SD", TFT_WIDTH - 12, 0, 1);
