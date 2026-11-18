@@ -411,6 +411,16 @@ bool EvilPortal::setAP(LinkedList<ssid>* ssids, LinkedList<AccessPoint>* access_
       Serial.println(F("ap config set"));
     #endif
     this->ap_index = targ_ap_index;
+    // Host the portal on the CLONED AP's own channel (so cloning an SSID on,
+    // e.g., 5 GHz ch 44 brings the portal up on 44, matching the real AP).
+    // Falls back to ch 1 when hosting from an SSID-list name or config file
+    // (no real AP channel to match), or if the stored channel looks invalid.
+    if (targ_ap_index >= 0) {
+      uint8_t ch = access_points->get(targ_ap_index).channel;
+      this->host_channel = (ch >= 1 && ch <= 177) ? ch : 1;
+    } else {
+      this->host_channel = 1;
+    }
     return true;
   }
   else
@@ -483,12 +493,22 @@ void EvilPortal::startAP() {
   // couldn't help because the beacon was being gated by sleep, not by low power.
   // The retry loop stays (a fragmented internal heap after a dense scan can make the
   // first WiFi.softAP() fail); on the healthy path it comes up on the first attempt.
+  #if defined(SOC_WIFI_SUPPORT_5G) && SOC_WIFI_SUPPORT_5G
+    // Hosting on a 5 GHz channel needs the dual-band radio enabled. Only touch
+    // the band mode for a 5 GHz target so the proven 2.4 GHz path is unchanged;
+    // power-save is pinned OFF again right after softAP() below, so this cannot
+    // reintroduce the modem-sleep that once throttled the beacon.
+    if (this->host_channel > 14)
+      esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
+  #endif
   bool up = false;
   for (int attempt = 0; attempt < 4; attempt++) {
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
-    // Channel 1 -- a 2.4 GHz channel, the band every phone scans.
-    up = WiFi.softAP(apName, NULL, 1);
+    // Host on the cloned AP's own channel (2.4 or 5 GHz); the C5 can softAP on
+    // either band. host_channel is set from the selected AP in setAP() (ch 1 if
+    // hosting from a plain SSID name).
+    up = WiFi.softAP(apName, NULL, this->host_channel);
     if (up && WiFi.softAPIP() != IPAddress(0, 0, 0, 0))
       break;
     // Failed to come up: drop the half-started AP and let the radio settle.

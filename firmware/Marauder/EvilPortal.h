@@ -92,6 +92,7 @@ class EvilPortal {
 
   public:
     int ap_index = -1;
+    uint8_t host_channel = 1;   // channel the softAP hosts on (the cloned AP's)
 
     String target_html_name = "index.html";
     uint8_t selected_html_index = 0;
