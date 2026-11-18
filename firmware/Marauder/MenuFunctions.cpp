@@ -5539,7 +5539,16 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         // Ported from Marauder Eternal: deauth confirmed camera links.
         static WiFiCameraDetector::DeauthTarget target{};
         if (!WiFiCameraDetector::selectDeauthTarget(target)) {
-          display_obj.init();
+          #if defined(MARAUDER_T_DONGLE_C5)
+            // A full tft.init() re-runs SPI.begin() and crashes the dongle (the
+            // TFT shares the SPI bus with the SD card) -- which left the screen
+            // black after backing out of camera/drone target selection. Light
+            // restore instead, matching the attack-exit path.
+            display_obj.tft.setRotation(SCREEN_ORIENTATION);
+            display_obj.clearScreen();
+          #else
+            display_obj.init();
+          #endif
           this->changeMenu(&nyanAttackMenu, true);
           return;
         }
@@ -5553,7 +5562,16 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         DroneRemoteID::CapturedDrone target{};
         if (!DroneRemoteID::selectCapturedForSpoof(target) ||
             !DroneRemoteIDSpoofer::selectTarget(target)) {
-          display_obj.init();
+          #if defined(MARAUDER_T_DONGLE_C5)
+            // A full tft.init() re-runs SPI.begin() and crashes the dongle (the
+            // TFT shares the SPI bus with the SD card) -- which left the screen
+            // black after backing out of camera/drone target selection. Light
+            // restore instead, matching the attack-exit path.
+            display_obj.tft.setRotation(SCREEN_ORIENTATION);
+            display_obj.clearScreen();
+          #else
+            display_obj.init();
+          #endif
           this->changeMenu(&nyanAttackMenu, true);
           return;
         }
@@ -5567,7 +5585,16 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         DroneRemoteID::CapturedDrone target{};
         if (!DroneRemoteID::loadSpoofFromFile("/remoteid_spoof.txt", target) ||
             !DroneRemoteIDSpoofer::selectTarget(target)) {
-          display_obj.init();
+          #if defined(MARAUDER_T_DONGLE_C5)
+            // A full tft.init() re-runs SPI.begin() and crashes the dongle (the
+            // TFT shares the SPI bus with the SD card) -- which left the screen
+            // black after backing out of camera/drone target selection. Light
+            // restore instead, matching the attack-exit path.
+            display_obj.tft.setRotation(SCREEN_ORIENTATION);
+            display_obj.clearScreen();
+          #else
+            display_obj.init();
+          #endif
           this->changeMenu(&nyanAttackMenu, true);
           return;
         }

@@ -63,25 +63,29 @@ void TDongleDisplay::begin() {
   tft.fillScreen(TFT_BLACK);
 
   // MarauderBox cat-in-a-box start screen: emblem framed on the left, name on
-  // the right (same branding as the boot splash, laid out for the 160x80 panel).
-  const int16_t box_x = 5, box_y = 4;
-  const int16_t box_h = tft.height() - 8;
-  const int16_t cat_h = box_h - 14;
+  // the right. Guard the panel height (the dongle's TFT can mis-report it) and
+  // keep clear top/bottom margins so the emblem is never clipped.
+  int16_t PH = tft.height();
+  if (PH < 60 || PH > 100) PH = 80;          // 160x80 landscape panel
+  const int16_t box_h = PH - 16;             // 8px margin top + bottom
+  const int16_t box_y = (PH - box_h) / 2;
+  const int16_t box_x = 6;
+  const int16_t cat_h = box_h - 12;
   const int16_t cat_w = static_cast<int16_t>(
       (static_cast<int32_t>(cat_h) * CAT_LOGO_WIDTH) / CAT_LOGO_HEIGHT);
-  const int16_t box_w = cat_w + 14;
+  const int16_t box_w = cat_w + 12;
   tdDrawCat(tft, box_x + (box_w - cat_w) / 2, box_y + (box_h - cat_h) / 2,
             cat_w, cat_h, TFT_WHITE);
-  tft.drawRoundRect(box_x, box_y, box_w, box_h, 6, TFT_WHITE);
-  tft.drawRoundRect(box_x + 2, box_y + 2, box_w - 4, box_h - 4, 5, TFT_WHITE);
+  tft.drawRoundRect(box_x, box_y, box_w, box_h, 5, TFT_WHITE);
+  tft.drawRoundRect(box_x + 2, box_y + 2, box_w - 4, box_h - 4, 4, TFT_WHITE);
 
   tft.setTextFont(1);
   tft.setTextSize(1);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  const int16_t tx = box_x + box_w + 8;
-  tft.drawString("MarauderBox", tx, 30, 1);
+  const int16_t tx = box_x + box_w + 10;
+  tft.drawString("MarauderBox", tx, box_y + 10, 1);
   tft.setTextColor(TFT_GREEN, TFT_BLACK);
-  tft.drawString("1.2.4", tx, 46, 1);
+  tft.drawString("1.2.4", tx, box_y + 26, 1);
 
   digitalWrite(kBacklightPin, LOW);
 }
