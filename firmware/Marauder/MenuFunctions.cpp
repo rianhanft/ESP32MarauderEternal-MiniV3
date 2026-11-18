@@ -5585,7 +5585,7 @@ void MenuFunctions::buildLazyMenu(Menu* menu)
         BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::Axon);
         this->changeMenu(&nyanBleMenu, true);
       });
-      this->addNodes(menu, "NyanBOX Sniff", TFTMAGENTA, BLUETOOTH_SNIFF, [this]() {
+      this->addNodes(menu, "MarauderBox Sniff", TFTMAGENTA, BLUETOOTH_SNIFF, [this]() {
         BLEDeviceDetectors::run(BLEDeviceDetectors::DetectorType::NyanBox);
         this->changeMenu(&nyanBleMenu, true);
       });
