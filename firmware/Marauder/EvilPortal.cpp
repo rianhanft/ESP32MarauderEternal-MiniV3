@@ -522,7 +522,17 @@ void EvilPortal::startAP() {
       if (esp_wifi_get_protocol(WIFI_IF_AP, &rp) == ESP_OK)
         g_ep_11b = (rp & WIFI_PROTOCOL_11B) != 0;
     #endif
-    esp_wifi_set_max_tx_power(80);   // 80 quarter-dBm = 20 dBm
+    // Force BEACONS (and all mgmt frames) to the 1 Mbps long-preamble 11b basic
+    // rate EXPLICITLY. Enabling the 11b protocol alone does not guarantee the
+    // beacon actually drops to 1 Mbps -- the driver can still beacon at a higher
+    // OFDM rate with much shorter reach (laptop sees it, phone at the same range
+    // does not). 1 Mbps is the longest-reach rate a phone can decode. Only valid
+    // because we pinned 11b/g/n above (the API rejects it under 11ax).
+    esp_err_t rate_err = esp_wifi_config_80211_tx_rate(WIFI_IF_AP, WIFI_PHY_RATE_1M_L);
+    #ifndef MARAUDER_V8
+      Serial.printf("[EP] beacon rate -> 1Mbps: %s\n", esp_err_to_name(rate_err));
+    #endif
+    esp_wifi_set_max_tx_power(84);   // 84 quarter-dBm = 21 dBm (chip max; clamps down if lower)
     // An access point must never modem-sleep; pin power-save OFF so the beacon
     // goes out continuously (the Eternal driver does the same in its WiFi init).
     esp_wifi_set_ps(WIFI_PS_NONE);
