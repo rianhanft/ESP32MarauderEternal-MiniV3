@@ -7,6 +7,7 @@
 #include <SPI.h>
 #include "soc/soc.h"
 #include "soc/usb_serial_jtag_reg.h"
+#include "CatLogo.h"
 
 // The TFT, microSD and APA102 LED share one SPI bus (SCLK 6 / MOSI 2 / MISO 7).
 // TFT_eSPI drives the panel through the GLOBAL `SPI` object; the SD card is
@@ -21,6 +22,34 @@ namespace {
 constexpr uint32_t kRefreshMs = 500;
 constexpr uint8_t kRowHeight = 13;
 constexpr uint8_t kBacklightPin = 0;
+
+// MarauderBox cat-in-a-box emblem, drawn straight from the shared 1-bit CatLogo
+// bitmap scaled to fit (nearest-neighbour -- plenty for this small start screen).
+inline bool tdCatBit(int16_t x, int16_t y) {
+  const int16_t rowbytes = (CAT_LOGO_WIDTH + 7) / 8;
+  const uint8_t packed = pgm_read_byte(CAT_LOGO_BITMAP + y * rowbytes + (x >> 3));
+  return (packed >> (7 - (x & 7))) & 0x01;
+}
+void tdDrawCat(TFT_eSPI& tft, int16_t dx, int16_t dy, int16_t dw, int16_t dh,
+               uint16_t color) {
+  if (dw <= 0 || dh <= 0) return;
+  for (int16_t y = 0; y < dh; ++y) {
+    const int16_t sy = static_cast<int16_t>(
+        (static_cast<int32_t>(y) * CAT_LOGO_HEIGHT) / dh);
+    int16_t run = -1;
+    for (int16_t x = 0; x < dw; ++x) {
+      const int16_t sx = static_cast<int16_t>(
+          (static_cast<int32_t>(x) * CAT_LOGO_WIDTH) / dw);
+      if (tdCatBit(sx, sy)) {
+        if (run < 0) run = x;
+      } else if (run >= 0) {
+        tft.drawFastHLine(dx + run, dy + y, x - run, color);
+        run = -1;
+      }
+    }
+    if (run >= 0) tft.drawFastHLine(dx + run, dy + y, dw - run, color);
+  }
+}
 }
 
 void TDongleDisplay::begin() {
@@ -32,11 +61,28 @@ void TDongleDisplay::begin() {
   tft.init();
   tft.setRotation(3);
   tft.fillScreen(TFT_BLACK);
+
+  // MarauderBox cat-in-a-box start screen: emblem framed on the left, name on
+  // the right (same branding as the boot splash, laid out for the 160x80 panel).
+  const int16_t box_x = 5, box_y = 4;
+  const int16_t box_h = tft.height() - 8;
+  const int16_t cat_h = box_h - 14;
+  const int16_t cat_w = static_cast<int16_t>(
+      (static_cast<int32_t>(cat_h) * CAT_LOGO_WIDTH) / CAT_LOGO_HEIGHT);
+  const int16_t box_w = cat_w + 14;
+  tdDrawCat(tft, box_x + (box_w - cat_w) / 2, box_y + (box_h - cat_h) / 2,
+            cat_w, cat_h, TFT_WHITE);
+  tft.drawRoundRect(box_x, box_y, box_w, box_h, 6, TFT_WHITE);
+  tft.drawRoundRect(box_x + 2, box_y + 2, box_w - 4, box_h - 4, 5, TFT_WHITE);
+
   tft.setTextFont(1);
   tft.setTextSize(1);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString("MarauderBox", 2, 1);
-  tft.drawFastHLine(0, 11, tft.width(), TFT_DARKGREY);
+  const int16_t tx = box_x + box_w + 8;
+  tft.drawString("MarauderBox", tx, 30, 1);
+  tft.setTextColor(TFT_GREEN, TFT_BLACK);
+  tft.drawString("1.2.4", tx, 46, 1);
+
   digitalWrite(kBacklightPin, LOW);
 }
 
