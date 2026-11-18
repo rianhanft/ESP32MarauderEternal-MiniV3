@@ -13728,9 +13728,15 @@ void WiFiScan::main(uint32_t currentTime)
       }
     }
 
-    if (evil_portal_obj.ap_index > -1)
-      this->changeChannel(access_points->get(evil_portal_obj.ap_index).channel);
-    
+    // Do NOT re-tune the radio here. The softAP already beacons on its own
+    // channel; calling esp_wifi_set_channel() on EVERY main() loop (to the cloned
+    // AP's channel, which usually differs from the softAP's channel 1, each call
+    // with a delay(1)) constantly interrupts the beacon. THAT is what made the
+    // portal appear weak / intermittent / slow to show in the phone's network
+    // list. MarauderEternal's portal loop does no re-tuning, which is exactly why
+    // it pops up immediately -- match that here and leave the AP alone.
+    // (ep_deauth, when explicitly enabled above, tunes per deauth frame and is a
+    // separate opt-in feature.)
     evil_portal_obj.main(currentScanMode);
   }
   else if (currentScanMode == WIFI_PACKET_MONITOR)
