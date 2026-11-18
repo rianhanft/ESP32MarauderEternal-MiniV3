@@ -493,12 +493,13 @@ void EvilPortal::startAP() {
   // couldn't help because the beacon was being gated by sleep, not by low power.
   // The retry loop stays (a fragmented internal heap after a dense scan can make the
   // first WiFi.softAP() fail); on the healthy path it comes up on the first attempt.
+  uint8_t try_channel = this->host_channel;
   #if defined(SOC_WIFI_SUPPORT_5G) && SOC_WIFI_SUPPORT_5G
     // Hosting on a 5 GHz channel needs the dual-band radio enabled. Only touch
     // the band mode for a 5 GHz target so the proven 2.4 GHz path is unchanged;
     // power-save is pinned OFF again right after softAP() below, so this cannot
     // reintroduce the modem-sleep that once throttled the beacon.
-    if (this->host_channel > 14)
+    if (try_channel > 14)
       esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
   #endif
   bool up = false;
@@ -506,15 +507,21 @@ void EvilPortal::startAP() {
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
     // Host on the cloned AP's own channel (2.4 or 5 GHz); the C5 can softAP on
-    // either band. host_channel is set from the selected AP in setAP() (ch 1 if
-    // hosting from a plain SSID name).
-    up = WiFi.softAP(apName, NULL, this->host_channel);
+    // either band. host_channel is set from the selected AP (ch 1 for a plain
+    // SSID name).
+    up = WiFi.softAP(apName, NULL, try_channel);
     if (up && WiFi.softAPIP() != IPAddress(0, 0, 0, 0))
       break;
     // Failed to come up: drop the half-started AP and let the radio settle.
     WiFi.softAPdisconnect(true);
     delay(200);
+    // If a 5 GHz channel will not host after a couple of tries (some C5 5 GHz
+    // channels are DFS or unsupported for softAP), fall back to 2.4 GHz ch 1 so
+    // the portal ALWAYS comes up. The status bar then shows the real channel.
+    if (try_channel > 14 && attempt >= 1)
+      try_channel = 1;
   }
+  this->host_channel = try_channel;   // record the channel we actually hosted on
 
   if (up) {
     // TX power is already confirmed maxed (20 dBm), yet the beacon is seen by a

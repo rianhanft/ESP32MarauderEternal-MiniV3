@@ -3220,6 +3220,15 @@ void WiFiScan::startWiFiAttacks(uint8_t scan_mode, uint16_t color, const char* t
     esp_wifi_set_mode(WIFI_MODE_STA);
   }
   esp_wifi_start();
+  #if defined(SOC_WIFI_SUPPORT_5G) && SOC_WIFI_SUPPORT_5G
+    // Dual-band attack: make sure the radio can tune to a 5 GHz target's channel.
+    // A prior mode left 2.4 GHz-only would make changeChannel() to a 5 GHz AP
+    // fail silently, so deauth frames for a 5 GHz target went out on the wrong
+    // channel (or nowhere) -- and could leave the radio mis-tuned for the 2.4 GHz
+    // targets later in the same multi-AP sweep. AUTO is the C5 default; asserting
+    // it here guarantees a mixed 2.4/5 GHz selection is handled.
+    esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
+  #endif
   this->setMac();
   this->changeChannel(this->set_channel);
   esp_wifi_set_promiscuous(true);
@@ -4529,6 +4538,18 @@ void WiFiScan::RunEvilPortal(uint8_t scan_mode, uint16_t color) {
   // early WITHOUT deiniting the radio, so the softAP lingers and the next scan
   // receives nothing. Letting Arduino own the whole softAP lifecycle is what lets
   // cleanup() tear the radio fully down so scans work again afterward.
+  // Host the portal on the SELECTED AP's channel. The menu/CLI select an AP with
+  // setAP(essid) + ap_index (which does not set the channel), so derive it here
+  // from ap_index -- this covers every selection path. Falls back to ch 1 for a
+  // typed SSID (ap_index < 0) or an out-of-range channel. The softAP bring-up in
+  // startAP() falls back to ch 1 on its own if a 5 GHz channel will not host.
+  if (evil_portal_obj.ap_index >= 0 &&
+      evil_portal_obj.ap_index < access_points->size()) {
+    uint8_t ch = access_points->get(evil_portal_obj.ap_index).channel;
+    evil_portal_obj.host_channel = (ch >= 1 && ch <= 177) ? ch : 1;
+  } else {
+    evil_portal_obj.host_channel = 1;
+  }
   evil_portal_obj.begin(ssids, access_points);
   this->wifi_initialized = true;
   initTime = millis();
