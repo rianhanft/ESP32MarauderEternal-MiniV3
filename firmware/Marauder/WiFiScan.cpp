@@ -5450,9 +5450,13 @@ void WiFiScan::RunEapolScan(uint8_t scan_mode, uint16_t color) {
         display_obj.scanTitle("EAPOL Sniff",SCREEN_WIDTH / 2,16,2);
       #endif
       display_obj.tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      display_obj.tftDrawChannelScaleButtons(set_channel, false);
-      display_obj.tftDrawExitScaleButtons(false);
-      display_obj.tftDrawChanHopButton(false, settings_obj.loadSetting<bool>("ChanHop"));
+      #ifndef MARAUDER_T_DONGLE_C5
+        // The 160x80 dongle has no touch and no room for the scale buttons; it
+        // shows the compact EAPOL/PMKID status (renderRawStats) instead.
+        display_obj.tftDrawChannelScaleButtons(set_channel, false);
+        display_obj.tftDrawExitScaleButtons(false);
+        display_obj.tftDrawChanHopButton(false, settings_obj.loadSetting<bool>("ChanHop"));
+      #endif
     #endif
 //  #endif
 
@@ -11857,7 +11861,42 @@ void WiFiScan::displayAnalyzerString(String str) {
 }
 
 void WiFiScan::renderRawStats() {
-  #ifdef HAS_SCREEN
+  #if defined(HAS_SCREEN) && defined(MARAUDER_T_DONGLE_C5)
+    // Compact EAPOL/PMKID status for the 160x80 panel -- the full stats list
+    // below overflows it. Show channel, EAPOL frame count, complete-handshake
+    // count, and a clear CAPTURED / not-captured result.
+    {
+      const bool eapol_mode = (this->currentScanMode == WIFI_SCAN_EAPOL) ||
+                              (this->currentScanMode == WIFI_SCAN_ACTIVE_EAPOL) ||
+                              (this->currentScanMode == WIFI_SCAN_ACTIVE_LIST_EAPOL);
+      const uint32_t complete = this->getCompleteEapol();
+      const int16_t topY = STATUS_BAR_WIDTH + 1;
+      display_obj.tft.fillRect(0, topY, SCREEN_WIDTH, SCREEN_HEIGHT - topY, TFT_BLACK);
+      display_obj.tft.setTextDatum(TL_DATUM);
+      display_obj.tft.setTextSize(1);
+      display_obj.tft.setTextColor(TFT_CYAN, TFT_BLACK);
+      display_obj.tft.drawString(eapol_mode ? "EAPOL / PMKID Sniff" : "Raw Capture",
+                                 2, topY + 1, 1);
+      display_obj.tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      display_obj.tft.drawString(String("CH ") + this->set_channel + "   EAPOL " +
+                                 this->eapol_frames, 2, topY + 14, 1);
+      display_obj.tft.drawString(String("Data ") + this->data_frames + "   Deauth " +
+                                 this->deauth_frames, 2, topY + 26, 1);
+      if (eapol_mode) {
+        display_obj.tft.drawString(String("Handshakes: ") + complete, 2, topY + 38, 1);
+        if (complete > 0) {
+          display_obj.tft.setTextColor(TFT_GREEN, TFT_BLACK);
+          display_obj.tft.drawString("EAPOL CAPTURED!", 2, topY + 52, 1);
+        } else if (this->eapol_frames > 0) {
+          display_obj.tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+          display_obj.tft.drawString("EAPOL seen, no full HS", 2, topY + 52, 1);
+        } else {
+          display_obj.tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+          display_obj.tft.drawString("Listening...", 2, topY + 52, 1);
+        }
+      }
+    }
+  #elif defined(HAS_SCREEN)
     uint8_t line_count = 0;
     display_obj.tft.fillRect(0,
                             (STATUS_BAR_WIDTH * 2) + 1 + EXT_BUTTON_WIDTH,
